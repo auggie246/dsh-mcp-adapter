@@ -29,6 +29,12 @@ Each Server configures exactly one Transport: `command` for stdio, or `url` for 
 
 The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. `env` and `headers` have the DSH `secret` schema role, so wire settings views redact their values.
 
+## Server lifecycle
+
+The Host creates no Server connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. MCP `tools/list_changed` notifications refresh that cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
+
+Changing, disabling, or removing a Server closes its connection and clears its cache. Re-enabling a Server restores the lazy behavior. A Connection RPC channel, `/mcp-adapter`, exposes detached `status` and `catalog` snapshots for the Settings page without exposing Config secrets or SDK objects.
+
 ## Install (local, development)
 
 Requires the `dsh` CLI and a web profile (the browser GUI you run DSH with).
