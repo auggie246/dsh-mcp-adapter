@@ -1,0 +1,43 @@
+{
+  "name": "dsh-mcp-adapter",
+  "version": "0.1.0",
+  "description": "DSH plugin connecting the agent to MCP servers through one mcp proxy tool and a Settings > MCP page. Mirrors pi-mcp-adapter's major features.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/auggie246/dsh-mcp-adapter.git"
+  },
+  "main": "src/host/index.js",
+  "exports": {
+    ".": {
+      "default": "./src/host/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
