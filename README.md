@@ -8,6 +8,27 @@ Vocabulary lives in [CONTEXT.md](./CONTEXT.md). Design decisions live in [docs/a
 
 Early development. See issues #1–#7 for the v1 scope and #8–#13 for deferred follow-ups.
 
+## Config
+
+The Host registers one live DSH settings namespace, `mcp`. Its user layer lives under `mcp:` in `$DSH_HOME/settings.yaml`; the Settings > MCP page will own normal edits.
+
+```yaml
+mcp:
+  mcpServers:
+    filesystem:
+      command: npx
+      args: [-y, "@modelcontextprotocol/server-filesystem", /workspace]
+      autoAllow: false
+    hosted:
+      url: https://mcp.example.com/api
+      headers:
+        Authorization: Bearer example-token
+```
+
+Each Server configures exactly one Transport: `command` for stdio, or `url` for streamable HTTP with SSE fallback. Adapter extension fields are `disabled`, `autoAllow`, `lifecycle` (`lazy` only in v1), `idleTimeoutMinutes` (default `10`), and `promotedTools`.
+
+The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. `env` and `headers` have the DSH `secret` schema role, so wire settings views redact their values.
+
 ## Install (local, development)
 
 Requires the `dsh` CLI and a web profile (the browser GUI you run DSH with).
