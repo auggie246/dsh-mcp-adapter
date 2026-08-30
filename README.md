@@ -35,6 +35,20 @@ The Host creates no Server connection at startup. The first tool-list or tool-ca
 
 Changing, disabling, or removing a Server closes its connection and clears its cache. Re-enabling a Server restores the lazy behavior. A Connection RPC channel, `/mcp-adapter`, exposes detached `status` and `catalog` snapshots for the Settings page without exposing Config secrets or SDK objects.
 
+## Proxy Tool
+
+The Host registers one global `mcp` tool with three actions:
+
+```text
+mcp({ action: "search", query: "screenshot" })
+mcp({ action: "describe", server: "browser", tool: "take_screenshot" })
+mcp({ action: "call", server: "browser", tool: "take_screenshot", args: {} })
+```
+
+Search results use `<server>__<tool>` names to avoid collisions. The first search fills empty metadata caches; later search and describe operations use the cache. Call requests ask for DSH approval unless that Server has `autoAllow: true`.
+
+Call, search, and describe output is limited to 50 KiB and 2,000 lines. Larger text uses `spillStore` for a full-result reference. Raw structured details larger than 16 KiB become a compact summary with their own spill reference.
+
 ## Install (local, development)
 
 Requires the `dsh` CLI and a web profile (the browser GUI you run DSH with).

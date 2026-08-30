@@ -1,4 +1,5 @@
 import { installMcpManager, installMcpManagerRpc } from './manager.js'
+import { installMcpProxyTool } from './proxy-tool.js'
 import { installMcpSettings } from './settings.js'
 
 export const name = 'dsh-mcp-adapter'
@@ -14,10 +15,15 @@ export function apply(ctx) {
       managerCtx.inject(['connection'], (rpcCtx) => {
         installMcpManagerRpc(rpcCtx, manager)
       })
+      managerCtx.inject(['tools'], (toolCtx) => {
+        installMcpProxyTool(toolCtx, manager)
+      })
     })
   })
 }
 
 export * from './manager.js'
 export * from './mcp-connection.js'
+export * from './output-guard.js'
+export * from './proxy-tool.js'
 export * from './settings.js'
