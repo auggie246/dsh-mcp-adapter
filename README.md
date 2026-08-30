@@ -65,9 +65,17 @@ Promotion changes apply through `settings/updated`. They do not restart a connec
 
 DSH native tool names must match `[A-Za-z0-9_-]` and contain at most 64 characters. The Adapter logs a warning and skips an invalid or colliding Promotion name.
 
-## Install (local, development)
+## Install
 
 Requires the `dsh` CLI and a web profile (the browser GUI you run DSH with).
+
+```sh
+dsh plugin --profile web add @auggieteo/dsh-mcp-adapter
+```
+
+Then restart DSH. The Settings panel (`⌘,` / sidebar foot) gains an **MCP** section.
+
+### Local development
 
 ```sh
 pnpm install
@@ -75,17 +83,36 @@ pnpm build          # produces lib/client.js (required before install)
 dsh plugin --profile web add /absolute/path/to/dsh-mcp-adapter
 ```
 
-Then restart DSH. The Settings panel (`⌘,` / sidebar foot) gains an **MCP** section.
+During client development, run `pnpm dev` alongside DSH. `dsh-client-hmr` reloads each rebuilt client bundle without a manual refresh.
 
-During client development, run `pnpm dev` alongside DSH: the always-mounted `dsh-client-hmr` row picks up every bundle rewrite and reloads the page plugin without a restart.
-
-Host-half changes need a DSH restart (the web profile disables host HMR for plugin rows).
+Host changes need a DSH restart. The web profile disables host HMR for plugin rows.
 
 ## Uninstall
 
 ```sh
-dsh plugin --profile web remove dsh-mcp-adapter
+dsh plugin --profile web remove @auggieteo/dsh-mcp-adapter
 ```
+
+## Release
+
+The package uses Semantic Versioning. Update `package.json` before each release.
+
+```sh
+pnpm version patch --no-git-tag-version  # or minor, major, or an explicit version
+pnpm test
+```
+
+Merge the version change. Then publish a GitHub Release whose tag is exactly `v<package version>`.
+
+The `Publish to npm` workflow rejects any different tag. It tests and builds the package before publishing with npm provenance.
+
+A prerelease GitHub Release publishes with the npm `next` tag. A regular GitHub Release publishes with the npm `latest` tag.
+
+The first publish creates the npm package. Add a short-lived granular npm token as the GitHub `NPM_TOKEN` secret for this publish.
+
+Then configure npm trusted publishing for `auggie246/dsh-mcp-adapter` and `publish.yml`. Allow `npm publish`, then delete `NPM_TOKEN`.
+
+Later releases use GitHub OIDC and need no long-lived npm token. npm requires the package to exist before trusted publishing configuration.
 
 ## Layout
 
