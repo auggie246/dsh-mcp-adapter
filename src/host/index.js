@@ -1,4 +1,5 @@
 import { installMcpManager, installMcpManagerRpc } from './manager.js'
+import { installMcpPromotions } from './promotions.js'
 import { installMcpProxyTool } from './proxy-tool.js'
 import { installMcpSettings } from './settings.js'
 
@@ -17,6 +18,7 @@ export function apply(ctx) {
       })
       managerCtx.inject(['tools'], (toolCtx) => {
         installMcpProxyTool(toolCtx, manager)
+        installMcpPromotions(toolCtx, manager, scope)
       })
     })
   })
@@ -25,5 +27,6 @@ export function apply(ctx) {
 export * from './manager.js'
 export * from './mcp-connection.js'
 export * from './output-guard.js'
+export * from './promotions.js'
 export * from './proxy-tool.js'
 export * from './settings.js'

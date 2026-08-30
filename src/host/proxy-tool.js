@@ -190,7 +190,7 @@ function findTool(tools, serverName, requested) {
   return undefined
 }
 
-async function requireTool(manager, serverName, requested, signal) {
+export async function resolveMcpTool(manager, serverName, requested, signal) {
   let tools = await listServerTools(manager, serverName, signal)
   let tool = findTool(tools, serverName, requested)
   if (tool !== undefined) return tool
@@ -279,7 +279,7 @@ async function searchAction(ctx, manager, query, exec) {
 }
 
 async function describeAction(ctx, manager, serverName, requested, exec) {
-  const tool = await requireTool(manager, serverName, requested, exec.signal)
+  const tool = await resolveMcpTool(manager, serverName, requested, exec.signal)
   const detail = {
     name: prefixedName(serverName, tool.name),
     server: serverName,
@@ -312,7 +312,15 @@ async function describeAction(ctx, manager, serverName, requested, exec) {
   }
 }
 
-async function requireApproval(ctx, manager, serverName, toolName, args, exec) {
+async function requireApproval(
+  ctx,
+  manager,
+  serverName,
+  toolName,
+  args,
+  exec,
+  approvalToolName,
+) {
   const config = manager.getServerConfig(serverName)
   if (config?.autoAllow) return
   const approval = ctx.get('approval')
@@ -324,7 +332,7 @@ async function requireApproval(ctx, manager, serverName, toolName, args, exec) {
   }
   const outcome = await approval.request({
     agent: exec.agent,
-    toolName: 'mcp',
+    toolName: approvalToolName,
     callId: exec.callId,
     reason:
       `Call MCP Server ${JSON.stringify(serverName)} tool ${JSON.stringify(toolName)}. ` +
@@ -336,9 +344,25 @@ async function requireApproval(ctx, manager, serverName, toolName, args, exec) {
   }
 }
 
-async function callAction(ctx, manager, serverName, requested, args, exec) {
-  const tool = await requireTool(manager, serverName, requested, exec.signal)
-  await requireApproval(ctx, manager, serverName, tool.name, args, exec)
+export async function executeMcpToolCall(
+  ctx,
+  manager,
+  serverName,
+  requested,
+  args,
+  exec,
+  { approvalToolName = 'mcp' } = {},
+) {
+  const tool = await resolveMcpTool(manager, serverName, requested, exec.signal)
+  await requireApproval(
+    ctx,
+    manager,
+    serverName,
+    tool.name,
+    args,
+    exec,
+    approvalToolName,
+  )
 
   let result
   try {
@@ -364,6 +388,25 @@ async function callAction(ctx, manager, serverName, requested, args, exec) {
     text: guarded.text,
     data: guarded.data,
     ...(guarded.guard === undefined ? {} : { guard: guarded.guard }),
+  }
+}
+
+export function createMcpCallOutput() {
+  return {
+    schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', const: 'call' },
+        text: { type: 'string' },
+        data: {},
+        guard: {},
+      },
+      required: ['action', 'text', 'data'],
+      additionalProperties: false,
+    },
+    render(_args, value) {
+      return [{ type: 'text', text: value.text }]
+    },
   }
 }
 
@@ -438,7 +481,14 @@ export function createMcpProxyTool(ctx, manager) {
         if (args.args !== undefined && !isRecord(args.args)) {
           throw new Error('mcp action "call" requires args to be an object when supplied')
         }
-        return callAction(ctx, manager, serverName, toolName, args.args ?? {}, exec)
+        return executeMcpToolCall(
+          ctx,
+          manager,
+          serverName,
+          toolName,
+          args.args ?? {},
+          exec,
+        )
       }
       throw new Error(`Unknown mcp action ${JSON.stringify(action)}. Use search, describe, or call.`)
     },

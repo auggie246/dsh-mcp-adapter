@@ -139,7 +139,7 @@ test('stdio Server stays lazy, caches tools, idles, and reconnects', async () =>
   await manager.dispose()
 })
 
-test('tool list changes refresh cache and Config edits replace connections', async () => {
+test('tool lists refresh, presentation edits stay live, and transport edits reconnect', async () => {
   const firstTool = {
     name: 'alpha',
     description: 'First tool',
@@ -167,7 +167,14 @@ test('tool list changes refresh cache and Config edits replace connections', asy
   assert.deepEqual(manager.getCachedTools('demo'), [replacementTool])
 
   await scope.replace({
-    mcpServers: { demo: serverConfig({ autoAllow: true }) },
+    mcpServers: { demo: serverConfig({ autoAllow: true, promotedTools: ['beta'] }) },
+  })
+  assert.equal(fake.connections[0].closed, false)
+  assert.deepEqual(manager.getCachedTools('demo'), [replacementTool])
+  assert.equal(manager.statusSnapshot().servers[0].state, 'connected')
+
+  await scope.replace({
+    mcpServers: { demo: serverConfig({ args: ['changed'], autoAllow: true }) },
   })
   assert.equal(fake.connections[0].closed, true)
   assert.deepEqual(manager.getCachedTools('demo'), [])

@@ -60,6 +60,18 @@ function normalizeTool(tool) {
   })
 }
 
+function connectionConfig(config) {
+  return {
+    command: config.command,
+    args: config.args,
+    env: config.env,
+    url: config.url,
+    headers: config.headers,
+    disabled: config.disabled,
+    lifecycle: config.lifecycle,
+  }
+}
+
 function initialState(config) {
   return config.disabled ? 'disabled' : 'disconnected'
 }
@@ -132,12 +144,21 @@ export class McpClientManager {
         continue
       }
       if (!equalJson(record.config, next)) {
-        await this.closeRecord(record, 'changed')
+        const mustReconnect = !equalJson(
+          connectionConfig(record.config),
+          connectionConfig(next),
+        )
+        const idleTimeoutChanged =
+          record.config.idleTimeoutMinutes !== next.idleTimeoutMinutes
+        if (mustReconnect) {
+          await this.closeRecord(record, 'changed')
+          record.state = initialState(next)
+          record.message = undefined
+          record.transportType = undefined
+          record.tools = []
+        }
         record.config = next
-        record.state = initialState(next)
-        record.message = undefined
-        record.transportType = undefined
-        record.tools = []
+        if (!mustReconnect && idleTimeoutChanged) this.scheduleIdle(record)
       }
     }
 
