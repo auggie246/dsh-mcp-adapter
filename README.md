@@ -6,7 +6,7 @@ Vocabulary lives in [CONTEXT.md](./CONTEXT.md). Design decisions live in [docs/a
 
 ## Status
 
-The v1 implementation is in progress through issues #1–#7. Issues #8–#13 track deferred follow-ups.
+The v1 implementation is complete through issues #1–#7. See the [v1 end-to-end verification](./docs/verification/v1-e2e.md). Issues #8–#14 track deferred follow-ups.
 
 ## Config
 
@@ -39,7 +39,7 @@ Every page write carries the latest namespace revision. Field edits use path mut
 
 ## Server lifecycle
 
-The Host creates no Server connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. MCP `tools/list_changed` notifications refresh that cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
+The Host creates no unpromoted Server connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. A persisted Promotion can connect once to rebuild its native input schema. MCP `tools/list_changed` notifications refresh the cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
 
 Changing, disabling, or removing a Server closes its connection and clears its cache. Re-enabling a Server restores the lazy behavior. A Connection RPC channel, `/mcp-adapter`, exposes detached `status`, `catalog`, and combined `overview` snapshots. Its `reconnect` endpoint restarts one named Server. These endpoints never expose Config secrets or SDK objects.
 
