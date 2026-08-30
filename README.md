@@ -6,11 +6,11 @@ Vocabulary lives in [CONTEXT.md](./CONTEXT.md). Design decisions live in [docs/a
 
 ## Status
 
-Early development. See issues #1–#7 for the v1 scope and #8–#13 for deferred follow-ups.
+The v1 implementation is in progress through issues #1–#7. Issues #8–#13 track deferred follow-ups.
 
 ## Config
 
-The Host registers one live DSH settings namespace, `mcp`. Its user layer lives under `mcp:` in `$DSH_HOME/settings.yaml`; the Settings > MCP page will own normal edits.
+The Host registers one live DSH settings namespace, `mcp`. Its user layer lives under `mcp:` in `$DSH_HOME/settings.yaml`; the Settings > MCP page owns normal edits.
 
 ```yaml
 mcp:
@@ -27,13 +27,21 @@ mcp:
 
 Each Server configures exactly one Transport: `command` for stdio, or `url` for streamable HTTP with SSE fallback. Adapter extension fields are `disabled`, `autoAllow`, `lifecycle` (`lazy` only in v1), `idleTimeoutMinutes` (default `10`), and `promotedTools`.
 
-The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. `env` and `headers` have the DSH `secret` schema role, so wire settings views redact their values.
+The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. Each `env` and `headers` value has the DSH `secret` schema role. Wire views retain each key and redact its value.
+
+## Settings page
+
+Open **Settings > MCP** to add, import, edit, reconnect, disable, or delete a Server. The Server list shows live connection state and cached tool counts. The detail panel manages Transport fields, secret values, Auto-allow, the idle timeout, and Promotions.
+
+JSON import accepts the standard `{ "mcpServers": { ... } }` shape. Import replaces matching Server entries and preserves Servers absent from the import.
+
+Every page write carries the latest namespace revision. Field edits use path mutations. Existing secret values remain saved when their value inputs stay blank.
 
 ## Server lifecycle
 
 The Host creates no Server connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. MCP `tools/list_changed` notifications refresh that cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
 
-Changing, disabling, or removing a Server closes its connection and clears its cache. Re-enabling a Server restores the lazy behavior. A Connection RPC channel, `/mcp-adapter`, exposes detached `status` and `catalog` snapshots for the Settings page without exposing Config secrets or SDK objects.
+Changing, disabling, or removing a Server closes its connection and clears its cache. Re-enabling a Server restores the lazy behavior. A Connection RPC channel, `/mcp-adapter`, exposes detached `status`, `catalog`, and combined `overview` snapshots. Its `reconnect` endpoint restarts one named Server. These endpoints never expose Config secrets or SDK objects.
 
 ## Proxy Tool
 

@@ -14,15 +14,13 @@ export const McpServerSchema = z
       .array(z.string())
       .description('Arguments passed to the stdio server command.'),
     env: z
-      .dict(z.string())
-      .role('secret')
+      .dict(z.string().role('secret'))
       .description('Environment variables passed to the stdio server.'),
     url: optionalString().description(
       'HTTP(S) endpoint for streamable HTTP with SSE fallback.',
     ),
     headers: z
-      .dict(z.string())
-      .role('secret')
+      .dict(z.string().role('secret'))
       .description('Headers sent to the remote HTTP MCP server.'),
 
     // Adapter extensions. These fields remain paste-compatible with standard

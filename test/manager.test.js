@@ -263,9 +263,12 @@ test('dispose waits for an in-flight connection and closes its late result', asy
 
 test('Connection RPC exposes detached status and catalog snapshots', async () => {
   let registration
+  const reconnects = []
   const manager = {
     statusSnapshot: () => ({ servers: [{ name: 'demo', state: 'connected', toolCount: 1 }] }),
     catalogSnapshot: () => ({ servers: [{ name: 'demo', tools: [{ name: 'ping' }] }] }),
+    async disconnect(name, reason) { reconnects.push(['disconnect', name, reason]) },
+    async listTools(name) { reconnects.push(['listTools', name]) },
   }
   const ctx = {
     connection: {
@@ -288,6 +291,20 @@ test('Connection RPC exposes detached status and catalog snapshots', async () =>
     ok: true,
     value: { servers: [{ name: 'demo', tools: [{ name: 'ping' }] }] },
   })
+  assert.equal((await registration.handler('overview')).ok, true)
+  assert.equal((await registration.handler('reconnect', {})).ok, false)
+  assert.equal(
+    (await registration.handler(
+      'reconnect',
+      { server: 'demo' },
+      new AbortController().signal,
+    )).ok,
+    true,
+  )
+  assert.deepEqual(reconnects, [
+    ['disconnect', 'demo', 'manual reconnect'],
+    ['listTools', 'demo'],
+  ])
   assert.equal((await registration.handler('missing')).ok, false)
 })
 

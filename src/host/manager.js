@@ -437,12 +437,60 @@ export const MCP_RPC_CHANNEL = '/mcp-adapter'
 export function installMcpManagerRpc(ctx, manager) {
   ctx.connection.rpc.handle(
     MCP_RPC_CHANNEL,
-    async (endpoint) => {
+    async (endpoint, payload, signal) => {
       if (endpoint === 'status') {
         return { ok: true, value: manager.statusSnapshot() }
       }
       if (endpoint === 'catalog') {
         return { ok: true, value: manager.catalogSnapshot() }
+      }
+      if (endpoint === 'overview') {
+        return {
+          ok: true,
+          value: {
+            status: manager.statusSnapshot(),
+            catalog: manager.catalogSnapshot(),
+          },
+        }
+      }
+      if (endpoint === 'reconnect') {
+        if (
+          typeof payload !== 'object' ||
+          payload === null ||
+          Array.isArray(payload) ||
+          typeof payload.server !== 'string' ||
+          payload.server.trim() === ''
+        ) {
+          return {
+            ok: false,
+            error: {
+              code: 'bad-request',
+              message: 'Reconnect requires a non-empty Server name.',
+              details: { issues: [] },
+            },
+          }
+        }
+        const serverName = payload.server.trim()
+        try {
+          await manager.disconnect(serverName, 'manual reconnect')
+          await manager.listTools(serverName, { signal })
+          return {
+            ok: true,
+            value: {
+              status: manager.statusSnapshot(),
+              catalog: manager.catalogSnapshot(),
+            },
+          }
+        } catch (error) {
+          return {
+            ok: false,
+            error: {
+              code: 'mcp-reconnect-failed',
+              message: errorMessage(error),
+              details: { issues: [] },
+            },
+          }
+        }
       }
       return {
         ok: false,

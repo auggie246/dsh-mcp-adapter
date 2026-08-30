@@ -1,12 +1,26 @@
-// Client half of dsh-mcp-adapter.
-//
-// Scaffold state (#1): registers the Settings > MCP section with a placeholder
-// page so the install is visible end to end. The real form arrives in #6,
-// bound to the Host `mcp` settings namespace via ctx.settingsScope.
+import { McpSettingsPage } from './McpSettingsPage.jsx'
+import {
+  MCP_RPC_CHANNEL,
+  MCP_SETTINGS_NAMESPACE,
+  McpSettingsController,
+} from './settings-controller.js'
+import { installMcpSettingsStyles } from './styles.js'
 
-export const inject = ['slots']
+export const inject = ['slots', 'settingsScope', 'connection']
 
 export function apply(ctx) {
+  const scope = ctx.settingsScope.bind({ namespace: MCP_SETTINGS_NAMESPACE })
+  const describe = ctx.settingsScope.describe()
+  const controller = new McpSettingsController({
+    scope,
+    describe,
+    settingsApi: ctx.connection.api.settings,
+    rpc: (endpoint, payload, signal) =>
+      ctx.connection.rpc.call(MCP_RPC_CHANNEL, endpoint, payload, signal),
+  })
+
+  ctx.effect(() => installMcpSettingsStyles(), 'mcp-adapter: Settings styles')
+  ctx.effect(() => () => controller.dispose(), 'mcp-adapter: Settings controller')
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(
       {
@@ -14,16 +28,9 @@ export function apply(ctx) {
         id: 'mcp',
         order: 30,
         label: 'MCP',
+        inject: () => ({ controller }),
       },
-      () => (
-        <div style={{ padding: 16 }}>
-          <h2>MCP</h2>
-          <p>
-            dsh-mcp-adapter is installed. The server list, per-server detail
-            form, and JSON import land with issue #6.
-          </p>
-        </div>
-      ),
+      McpSettingsPage,
     ),
   )
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { Context } from '@deepseek-ai/cordis'
-import { SettingsProvider } from '@deepseek-ai/dsh-settings'
+import { SettingsProvider, redactSecrets } from '@deepseek-ai/dsh-settings'
 
 import * as Adapter from '../src/host/index.js'
 import {
@@ -79,6 +79,28 @@ test('resolves standard HTTP Config with bearer headers', () => {
   assert.equal(config.mcpServers.linear.autoAllow, true)
   assert.deepEqual(config.mcpServers.linear.args, [])
   assert.deepEqual(config.mcpServers.linear.env, {})
+})
+
+test('redacts secret values while preserving their editable key paths', () => {
+  const config = resolve({
+    mcpServers: {
+      stdio: { command: 'node', env: { API_TOKEN: 'secret' } },
+      remote: {
+        url: 'https://mcp.example.test/api',
+        headers: { Authorization: 'Bearer secret' },
+      },
+    },
+  })
+  const redacted = redactSecrets(McpSettingsSchema, config)
+  assert.deepEqual(redacted.value.mcpServers.stdio.env, {})
+  assert.deepEqual(redacted.value.mcpServers.remote.headers, {})
+  assert.deepEqual(
+    redacted.secrets.map((secret) => secret.path),
+    [
+      ['mcpServers', 'stdio', 'env', 'API_TOKEN'],
+      ['mcpServers', 'remote', 'headers', 'Authorization'],
+    ],
+  )
 })
 
 test('requires exactly one transport with actionable paths', () => {
