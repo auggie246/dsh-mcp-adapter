@@ -61,9 +61,9 @@ function SecretEditor({ field, rows, onChange, disabled }) {
           <input
             className="mcp-input"
             aria-label={`${label} value ${index + 1}`}
-            type="password"
+            type={field === 'env' ? 'password' : 'text'}
             autoComplete="off"
-            placeholder={row.originalKey === undefined ? 'Secret value' : 'Saved value'}
+            placeholder={row.originalKey === undefined ? 'Value' : 'Saved value'}
             value={row.value}
             disabled={disabled}
             onChange={(event) => update(index, { value: event.target.value })}
@@ -87,6 +87,16 @@ function SecretEditor({ field, rows, onChange, disabled }) {
   )
 }
 
+function useEscapeClose(onClose) {
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+}
+
 function AddServerDialog({ controller, busy, onClose }) {
   const [name, setName] = useState('')
   const [transport, setTransport] = useState('stdio')
@@ -94,7 +104,7 @@ function AddServerDialog({ controller, busy, onClose }) {
   const [url, setUrl] = useState('')
   const [argsText, setArgsText] = useState('[]')
   const [error, setError] = useState()
-
+  useEscapeClose(onClose)
   const submit = async (event) => {
     event.preventDefault()
     setError(undefined)
@@ -167,6 +177,7 @@ function AddServerDialog({ controller, busy, onClose }) {
                 className="mcp-textarea"
                 value={argsText}
                 disabled={busy}
+                placeholder={'["-y", "@modelcontextprotocol/server-github"]'}
                 onChange={(event) => setArgsText(event.target.value)}
                 spellCheck={false}
               />
@@ -200,6 +211,7 @@ function AddServerDialog({ controller, busy, onClose }) {
 function ImportDialog({ controller, busy, onClose }) {
   const [text, setText] = useState('{\n  "mcpServers": {\n    \n  }\n}')
   const [error, setError] = useState()
+  useEscapeClose(onClose)
   const submit = async (event) => {
     event.preventDefault()
     setError(undefined)
@@ -349,7 +361,7 @@ function ServerDetail({ controller, snapshot, name, server }) {
           <div className="mcp-row">
             <span className={`mcp-status-dot ${statusClass(status.state)}`} />
             <h2 className="mcp-card-title">{name}</h2>
-            <span className="mcp-badge">{status.state}</span>
+            <span className={`mcp-badge ${statusClass(status.state)}`}>{status.state}</span>
           </div>
           <p className="mcp-muted">
             {status.toolCount} {status.toolCount === 1 ? 'tool' : 'tools'} cached
@@ -615,7 +627,7 @@ export function McpSettingsPage({ controller }) {
             <button
               type="button"
               className="mcp-button mcp-button-primary"
-              disabled={!settings.writable}
+              disabled={snapshot.busy || !settings.writable}
               onClick={() => setDialog('add')}
             >
               Add Server
@@ -623,7 +635,7 @@ export function McpSettingsPage({ controller }) {
             <button
               type="button"
               className="mcp-button"
-              disabled={!settings.writable}
+              disabled={snapshot.busy || !settings.writable}
               onClick={() => setDialog('import')}
             >
               Import JSON
