@@ -105,6 +105,8 @@ function AddServerDialog({ controller, busy, onClose }) {
   const [command, setCommand] = useState('')
   const [url, setUrl] = useState('')
   const [argsText, setArgsText] = useState('[]')
+  const [auth, setAuth] = useState('headers')
+  const [scopesText, setScopesText] = useState('')
   const [error, setError] = useState()
   useEscapeClose(onClose)
   const submit = async (event) => {
@@ -116,7 +118,7 @@ function AddServerDialog({ controller, busy, onClose }) {
         name,
         transport === 'stdio'
           ? { command, args: parseArgs(argsText) }
-          : { url },
+          : { url, auth, scopes: auth === 'oauth' ? parseScopes(scopesText) : [] },
       )
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError))
@@ -186,16 +188,53 @@ function AddServerDialog({ controller, busy, onClose }) {
             </label>
           </>
         ) : (
-          <label className="mcp-field">
-            <span className="mcp-label">URL</span>
-            <input
-              className="mcp-input"
-              value={url}
-              disabled={busy}
-              onChange={(event) => setUrl(event.target.value)}
-              placeholder="https://example.com/mcp"
-            />
-          </label>
+          <>
+            <label className="mcp-field">
+              <span className="mcp-label">URL</span>
+              <input
+                className="mcp-input"
+                value={url}
+                disabled={busy}
+                onChange={(event) => setUrl(event.target.value)}
+                placeholder="https://example.com/mcp"
+              />
+            </label>
+            <div className="mcp-field-row">
+              <label className="mcp-field">
+                <span className="mcp-label">HTTP authentication</span>
+                <select
+                  className="mcp-select"
+                  value={auth}
+                  disabled={busy}
+                  title="Static headers send fixed values on every request. OAuth 2.0 with PKCE signs in through the provider in your browser."
+                  onChange={(event) => setAuth(event.target.value)}
+                >
+                  <option value="headers">Static headers</option>
+                  <option value="oauth">OAuth 2.0 with PKCE</option>
+                </select>
+              </label>
+              {auth === 'oauth' && (
+                <label className="mcp-field">
+                  <span className="mcp-label">OAuth scopes (optional, comma-separated)</span>
+                  <input
+                    className="mcp-input"
+                    value={scopesText}
+                    disabled={busy}
+                    placeholder="read write"
+                    title="Optional. Leave empty when the provider defines no scopes — for example Context7. Request only scopes the provider grants."
+                    onChange={(event) => setScopesText(event.target.value)}
+                  />
+                  <span className="mcp-muted">Leave empty unless the provider requires scopes.</span>
+                </label>
+              )}
+            </div>
+            {auth === 'oauth' && (
+              <p className="mcp-muted">
+                OAuth signs in through your browser. The Sign in button appears
+                on the Server panel after you save.
+              </p>
+            )}
+          </>
         )}
         <div className="mcp-actions">
           <button type="submit" className="mcp-button mcp-button-primary" disabled={busy}>
@@ -296,14 +335,19 @@ function OAuthSection({ controller, snapshot, name }) {
         <p className="mcp-muted">
           OAuth 2.0 with PKCE. {oauthState}. Sign-in opens the authorization
           page in your browser; the Adapter completes the flow in the
-          background and reconnects with the fresh tokens.
+          background and reconnects with the fresh tokens. If no tab opens,
+          allow pop-ups for this page or run /mcp-auth.
         </p>
+        {oauthStatus !== undefined && oauthStatus.configured === true && !oauthSignedIn && (
+          <div className="mcp-warning">This Server cannot connect until you sign in.</div>
+        )}
       </div>
       <div className="mcp-actions">
         <button
           type="button"
           className="mcp-button mcp-button-primary"
           disabled={snapshot.busy}
+          title="Opens the provider's authorization page in a new browser tab. The Adapter finishes the flow in the background and reconnects."
           onClick={() => void signIn()}
         >
           Sign in
@@ -312,6 +356,7 @@ function OAuthSection({ controller, snapshot, name }) {
           type="button"
           className="mcp-button"
           disabled={snapshot.busy}
+          title="Deletes the stored tokens and disconnects this Server."
           onClick={() => void controller.signOut(name)}
         >
           Sign out
@@ -597,6 +642,7 @@ function ServerDetail({ controller, snapshot, name, server }) {
                   className="mcp-select"
                   value={draft.auth ?? 'headers'}
                   disabled={snapshot.busy}
+                  title="Static headers send fixed values on every request. OAuth 2.0 with PKCE signs in through the provider in your browser."
                   onChange={(event) => changeDraft({ auth: event.target.value })}
                 >
                   <option value="headers">Static headers</option>
@@ -605,17 +651,25 @@ function ServerDetail({ controller, snapshot, name, server }) {
               </label>
               {draft.auth === 'oauth' && (
                 <label className="mcp-field">
-                  <span className="mcp-label">OAuth scopes (comma-separated)</span>
+                  <span className="mcp-label">OAuth scopes (optional, comma-separated)</span>
                   <input
                     className="mcp-input"
                     value={draft.scopesText}
                     disabled={snapshot.busy}
                     placeholder="read write"
+                    title="Optional. Leave empty when the provider defines no scopes — for example Context7. Request only scopes the provider grants."
                     onChange={(event) => changeDraft({ scopesText: event.target.value })}
                   />
+                  <span className="mcp-muted">Leave empty unless the provider requires scopes.</span>
                 </label>
               )}
             </div>
+            {draft.auth === 'oauth' && (
+              <p className="mcp-muted">
+                OAuth signs in through your browser. The Sign in button appears
+                after you save this Server.
+              </p>
+            )}
             <SecretEditor field="headers" rows={rows} onChange={changeRows} disabled={snapshot.busy} />
           </>
         )}
