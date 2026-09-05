@@ -1,3 +1,4 @@
+import { installMcpCommands } from './commands.js'
 import { installMcpManager, installMcpManagerRpc } from './manager.js'
 import { installMcpPromotions } from './promotions.js'
 import { installMcpProxyTool } from './proxy-tool.js'
@@ -16,6 +17,9 @@ export function apply(ctx) {
       managerCtx.inject(['connection'], (rpcCtx) => {
         installMcpManagerRpc(rpcCtx, manager)
       })
+      managerCtx.inject(['commands'], (cmdCtx) => {
+        installMcpCommands(cmdCtx, manager, scope)
+      })
       managerCtx.inject(['tools'], (toolCtx) => {
         installMcpProxyTool(toolCtx, manager)
         installMcpPromotions(toolCtx, manager, scope)
@@ -24,6 +28,7 @@ export function apply(ctx) {
   })
 }
 
+export * from './commands.js'
 export * from './manager.js'
 export * from './mcp-connection.js'
 export * from './output-guard.js'
