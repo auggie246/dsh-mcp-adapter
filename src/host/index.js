@@ -8,6 +8,7 @@ import { installMcpPromptCommand } from './prompt-commands.js'
 import { installMcpPromotions } from './promotions.js'
 import { installMcpProxyTool } from './proxy-tool.js'
 import { installMcpSettings } from './settings.js'
+import { installMcpSkill } from './skill.js'
 import { installWorkspaceLayer } from './workspace-config.js'
 
 export const name = 'dsh-mcp-adapter'
@@ -17,6 +18,9 @@ export const name = 'dsh-mcp-adapter'
 export const inject = []
 
 export function apply(ctx) {
+  // The bundled agent skill is independent of every other Adapter feature: a
+  // deployment without the skills service simply gets no skill entry.
+  ctx.inject(['skills'], (skillCtx) => installMcpSkill(skillCtx))
   installMcpSettings(ctx, (settingsCtx, scope) => {
     const layeredScope = installWorkspaceLayer(settingsCtx, scope)
     settingsCtx.inject(['timer'], (managerCtx) => {
@@ -68,4 +72,5 @@ export * from './prompt-commands.js'
 export * from './promotions.js'
 export * from './proxy-tool.js'
 export * from './settings.js'
+export * from './skill.js'
 export * from './workspace-config.js'

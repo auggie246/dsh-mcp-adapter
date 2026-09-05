@@ -11,6 +11,7 @@
   "main": "src/host/index.js",
   "files": [
     "src/host/",
+    "skills/",
     "lib/client.js",
     "lib/client.js.map",
     "cordis.patch.yml",

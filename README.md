@@ -110,6 +110,10 @@ Promotion changes apply through `settings/updated`. They do not restart a connec
 
 DSH native tool names must match `[A-Za-z0-9_-]` and contain at most 64 characters. The Adapter logs a warning and skips an invalid or colliding Promotion name.
 
+## Agent skill
+
+The package bundles a model-facing skill in `skills/mcp-adapter/SKILL.md`. When the DSH `skills` service is present, the Adapter registers it at startup as a runtime skill named `mcp-adapter`, so agents learn the search → describe → call workflow, how to read failure messages (including the OAuth sign-in hint), and which commands belong to the human. The frontmatter drives routing; edit the file to change the guidance, and a DSH restart picks the edit up.
+
 ## Resources and prompts
 
 Servers that expose MCP resources and prompts surface through the `mcp` Proxy Tool. There are no per-resource native tools and no browse UI.
