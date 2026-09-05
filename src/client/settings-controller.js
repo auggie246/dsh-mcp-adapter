@@ -360,13 +360,20 @@ export class McpSettingsController {
   /** Fetch `oauth-status` for every Server configured with OAuth. */
   async loadOauthStatuses() {
     if (this.disposed) return
-    const servers = this.scope.getSnapshot().value?.mcpServers ?? {}
-    const names = Object.entries(servers)
-      .filter(([, config]) => config?.auth === 'oauth' && typeof config.url === 'string')
-      .map(([name]) => name)
+    // Names come from the merged Config view: the global namespace plus the
+    // sanitized workspace layer, so workspace-defined Servers are signable.
+    const globalServers = this.scope.getSnapshot().value?.mcpServers ?? {}
+    const workspaceServers = this.layers?.servers ?? {}
+    const names = new Set()
+    for (const [name, config] of Object.entries(globalServers)) {
+      if (config?.auth === 'oauth' && typeof config.url === 'string') names.add(name)
+    }
+    for (const [name, config] of Object.entries(workspaceServers)) {
+      if (config?.auth === 'oauth' && typeof config.url === 'string') names.add(name)
+    }
     const statuses = {}
     await Promise.all(
-      names.map(async (name) => {
+      [...names].map(async (name) => {
         try {
           const result = await this.rpc('oauth-status', { server: name })
           if (result.ok) statuses[name] = result.value

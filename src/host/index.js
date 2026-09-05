@@ -30,15 +30,24 @@ export function apply(ctx) {
               oauth?.noteAuthorizationRequired(serverName, url),
           }),
       })
-      oauth = installMcpOauth(managerCtx, manager, scope, { store })
+      // The OAuth controller and every command read the LAYERED scope, so a
+      // workspace-defined Server is signable and status-visible. Writes still
+      // land in the global namespace: the layered scope forwards them there.
+      oauth = installMcpOauth(managerCtx, manager, layeredScope, { store })
       managerCtx.inject(['connection'], (rpcCtx) => {
         installMcpManagerRpc(rpcCtx, manager, {
-          layerSnapshot: () => layeredScope.layerSnapshot(),
+          // Refresh the workspace layer before each snapshot, giving the
+          // Settings page poll a real refresh path for a file created after
+          // startup.
+          layerSnapshot: async () => {
+            await layeredScope.refreshLayers()
+            return layeredScope.layerSnapshot()
+          },
           oauth,
         })
       })
-      installMcpCommands(managerCtx, manager, scope)
-      installMcpOauthCommands(managerCtx, manager, scope, oauth)
+      installMcpCommands(managerCtx, manager, layeredScope)
+      installMcpOauthCommands(managerCtx, layeredScope, oauth)
       installMcpPromptCommand(managerCtx, manager)
       managerCtx.inject(['tools'], (toolCtx) => {
         installMcpProxyTool(toolCtx, manager)

@@ -54,7 +54,7 @@ function commandHarness({ servers, store, oauth }) {
     scope,
     { store: store ?? memoryStore() },
   )
-  installMcpOauthCommands(ctx, manager, scope, controller)
+  installMcpOauthCommands(ctx, scope, controller)
   return { definition: registered[0], manager, controller }
 }
 

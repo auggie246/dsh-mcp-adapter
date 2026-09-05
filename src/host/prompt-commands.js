@@ -1,12 +1,9 @@
 import { renderPromptMessages } from './proxy-tool.js'
+import { errorMessage } from './errors.js'
 
 export const MCP_PROMPT_COMMAND_NAME = 'mcp-prompt'
 
 const USAGE = 'Usage: /mcp-prompt <server> <prompt> [json-args]'
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error)
-}
 
 function parseInvocation(rawInput) {
   const text = typeof rawInput === 'string' ? rawInput.trim() : ''

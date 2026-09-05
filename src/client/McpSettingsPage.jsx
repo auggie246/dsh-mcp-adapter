@@ -266,6 +266,112 @@ function ImportDialog({ controller, busy, onClose }) {
   )
 }
 
+/**
+ * OAuth sign-in/sign-out section, shared by the editable detail and the
+ * read-only workspace detail. Sign-in works for workspace-defined Servers
+ * too: the Adapter resolves the Server through the merged Config.
+ */
+function OAuthSection({ controller, snapshot, name }) {
+  const oauthStatus = snapshot.oauthStatuses?.[name]
+  const oauthSignedIn =
+    oauthStatus !== undefined &&
+    oauthStatus.signedIn === true &&
+    (oauthStatus.expiresAt === undefined || oauthStatus.expiresAt > Date.now())
+  const oauthState = oauthStatus?.configured
+    ? oauthSignedIn
+      ? 'Signed in'
+      : oauthStatus.expiresAt !== undefined
+        ? 'Signed out (token expired)'
+        : 'Signed out'
+    : 'Signed out'
+  const signIn = async () => {
+    const result = await controller.signIn(name)
+    if (result?.authorizationUrl) window.open(result.authorizationUrl, '_blank')
+  }
+
+  return (
+    <div className="mcp-section">
+      <div>
+        <h3 className="mcp-section-title">OAuth</h3>
+        <p className="mcp-muted">
+          OAuth 2.0 with PKCE. {oauthState}. Sign-in opens the authorization
+          page in your browser; the Adapter completes the flow in the
+          background and reconnects with the fresh tokens.
+        </p>
+      </div>
+      <div className="mcp-actions">
+        <button
+          type="button"
+          className="mcp-button mcp-button-primary"
+          disabled={snapshot.busy}
+          onClick={() => void signIn()}
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          className="mcp-button"
+          disabled={snapshot.busy}
+          onClick={() => void controller.signOut(name)}
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Read-only detail for a Server defined only in the workspace `.dsh/mcp.json`.
+ * Edits write the global Config layer, which the workspace file overrides, so
+ * the panel shows the sanitized workspace Config and, for OAuth Servers, the
+ * sign-in actions.
+ */
+function WorkspaceServerDetail({ controller, snapshot, name, server }) {
+  const status = statusFor(snapshot.overview, name)
+  return (
+    <div className="mcp-card">
+      <div className="mcp-card-head">
+        <div>
+          <div className="mcp-row">
+            <span className={`mcp-status-dot ${statusClass(status.state)}`} />
+            <h2 className="mcp-card-title">{name}</h2>
+            <span className={`mcp-badge ${statusClass(status.state)}`}>{status.state}</span>
+            <span className="mcp-badge mcp-badge-workspace">workspace</span>
+          </div>
+          <p className="mcp-muted">
+            {status.toolCount} {status.toolCount === 1 ? 'tool' : 'tools'} cached
+            {status.transport === undefined ? '' : ` · ${status.transport}`}
+          </p>
+        </div>
+      </div>
+      <div className="mcp-layer-notice">
+        Read-only: defined by the workspace .dsh/mcp.json file. Edit that file
+        to change this Server.
+      </div>
+      <div className="mcp-section">
+        <h3 className="mcp-section-title">Config</h3>
+        <p className="mcp-muted">
+          {typeof server.command === 'string'
+            ? `stdio: ${server.command}${(server.args ?? []).length > 0 ? ` ${server.args.join(' ')}` : ''}`
+            : `HTTP: ${server.url}`}{' '}
+          · lifecycle {server.lifecycle ?? 'lazy'} · {server.autoAllow ? 'auto-allow' : 'asks per call'}
+        </p>
+      </div>
+      {typeof server.url === 'string' && server.auth === 'oauth' && (
+        <OAuthSection controller={controller} snapshot={snapshot} name={name} />
+      )}
+      <div className="mcp-section">
+        <h3 className="mcp-section-title">Promotions</h3>
+        <p className="mcp-muted">
+          Promotions for a workspace Server are managed in the workspace file
+          through its promotedTools list.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function ServerDetail({ controller, snapshot, name, server }) {
   const status = statusFor(snapshot.overview, name)
   const tools = catalogFor(snapshot.overview, name)
@@ -361,23 +467,6 @@ function ServerDetail({ controller, snapshot, name, server }) {
   }
   const remove = async () => {
     if (await controller.deleteServer(name)) setConfirmDelete(false)
-  }
-
-  const oauthStatus = snapshot.oauthStatuses?.[name]
-  const oauthSignedIn =
-    oauthStatus !== undefined &&
-    oauthStatus.signedIn === true &&
-    (oauthStatus.expiresAt === undefined || oauthStatus.expiresAt > Date.now())
-  const oauthState = oauthStatus?.configured
-    ? oauthSignedIn
-      ? 'Signed in'
-      : oauthStatus.expiresAt !== undefined
-        ? 'Signed out (token expired)'
-        : 'Signed out'
-    : 'Signed out'
-  const signIn = async () => {
-    const result = await controller.signIn(name)
-    if (result?.authorizationUrl) window.open(result.authorizationUrl, '_blank')
   }
 
   return (
@@ -580,34 +669,7 @@ function ServerDetail({ controller, snapshot, name, server }) {
       </form>
 
       {typeof server.url === 'string' && server.auth === 'oauth' && (
-        <div className="mcp-section">
-          <div>
-            <h3 className="mcp-section-title">OAuth</h3>
-            <p className="mcp-muted">
-              OAuth 2.0 with PKCE. {oauthState}. Sign-in opens the authorization
-              page in your browser; the Adapter completes the flow in the
-              background and reconnects with the fresh tokens.
-            </p>
-          </div>
-          <div className="mcp-actions">
-            <button
-              type="button"
-              className="mcp-button mcp-button-primary"
-              disabled={snapshot.busy}
-              onClick={() => void signIn()}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
-              className="mcp-button"
-              disabled={snapshot.busy}
-              onClick={() => void controller.signOut(name)}
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
+        <OAuthSection controller={controller} snapshot={snapshot} name={name} />
       )}
 
       <div className="mcp-section">
@@ -655,14 +717,23 @@ export function McpSettingsPage({ controller }) {
   const [dialog, setDialog] = useState()
   const settings = snapshot.settings
   const servers = settings.value?.mcpServers ?? {}
-  const names = useMemo(() => Object.keys(servers).sort(), [servers])
+  // Workspace-only Servers (absent from the global namespace) still surface:
+  // the sidebar unions both sources and the detail renders read-only.
+  const workspaceServers = snapshot.layers?.servers ?? {}
+  const names = useMemo(
+    () => [...new Set([...Object.keys(servers), ...Object.keys(workspaceServers)])].sort(),
+    [servers, workspaceServers],
+  )
 
   useEffect(() => controller.mount(), [controller])
   useEffect(() => {
-    if (selected === undefined || !Object.hasOwn(servers, selected)) {
+    if (
+      selected === undefined ||
+      (!Object.hasOwn(servers, selected) && !Object.hasOwn(workspaceServers, selected))
+    ) {
       setSelected(names[0])
     }
-  }, [names, selected, servers])
+  }, [names, selected, servers, workspaceServers])
 
   if (settings.status === 'loading') {
     return <section className="mcp-settings"><p className="mcp-muted">Loading MCP Settings…</p></section>
@@ -766,6 +837,15 @@ export function McpSettingsPage({ controller }) {
               snapshot={snapshot}
               name={selected}
               server={servers[selected]}
+            />
+          )}
+          {selected !== undefined && servers[selected] === undefined && workspaceServers[selected] !== undefined && (
+            <WorkspaceServerDetail
+              key={selected}
+              controller={controller}
+              snapshot={snapshot}
+              name={selected}
+              server={workspaceServers[selected]}
             />
           )}
         </div>

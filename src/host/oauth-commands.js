@@ -1,6 +1,4 @@
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error)
-}
+import { errorMessage } from './errors.js'
 
 const USAGE = 'Usage: /mcp-auth [server] [login|logout|status]'
 
@@ -74,11 +72,10 @@ async function runMcpAuthCommand(rawInput, oauth, settingsScope) {
 
 /**
  * Register the `mcp-auth` DSH command. The handler never throws: every outcome
- * becomes `{ kind: 'success' | 'error', text }`. `manager` stays in the
- * signature for parity with the other installers; the controller owns
- * disconnects.
+ * becomes `{ kind: 'success' | 'error', text }`. The controller owns
+ * disconnects, so the manager is not needed here.
  */
-export function installMcpOauthCommands(ctx, manager, settingsScope, oauth) {
+export function installMcpOauthCommands(ctx, settingsScope, oauth) {
   ctx.inject(['commands'], (commandsCtx) => {
     const dispose = commandsCtx.commands.register({
       name: 'mcp-auth',

@@ -386,3 +386,54 @@ test('controller writes through the current namespace revision and folds the ans
   assert.equal(writes[1][1].patch.mcpServers.remote.url, 'https://example.test/mcp')
   await controller.dispose()
 })
+
+test('loadOauthStatuses probes OAuth Servers defined only in the workspace layer', async () => {
+  const rpcCalls = []
+  const scope = {
+    getSnapshot: () => ({
+      status: 'ready',
+      value: { mcpServers: { local: { command: 'node', auth: 'headers' } } },
+      revision: 1,
+      writable: true,
+    }),
+    subscribe() {
+      return () => {}
+    },
+  }
+  const describe = {
+    getSnapshot: () => ({ status: 'ready', view: {}, error: null }),
+    subscribe() {
+      return () => {}
+    },
+    async ensure() {},
+    acceptView() {},
+  }
+  const controller = new McpSettingsController({
+    scope,
+    describe,
+    settingsApi: {},
+    rpc: async (endpoint, payload) => {
+      rpcCalls.push([endpoint, payload])
+      if (endpoint === 'oauth-status') {
+        return { ok: true, value: { configured: true, signedIn: false, url: 'https://w.test/api' } }
+      }
+      return { ok: true, value: { status: { servers: [] }, catalog: { servers: [] } } }
+    },
+  })
+  controller.layers = {
+    source: { workspaceOnly: 'workspace' },
+    error: undefined,
+    servers: {
+      workspaceOnly: { url: 'https://w.test/api', auth: 'oauth' },
+      local: { command: 'node', auth: 'headers' },
+    },
+  }
+
+  await controller.loadOauthStatuses()
+  assert.deepEqual(controller.getSnapshot().oauthStatuses, {
+    workspaceOnly: { configured: true, signedIn: false, url: 'https://w.test/api' },
+  })
+  const statusCalls = rpcCalls.filter(([endpoint]) => endpoint === 'oauth-status')
+  assert.deepEqual(statusCalls, [['oauth-status', { server: 'workspaceOnly' }]])
+  await controller.dispose()
+})

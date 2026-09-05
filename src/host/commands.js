@@ -1,10 +1,8 @@
+import { errorMessage } from './errors.js'
+
 const MCP_COMMAND_NAME = 'mcp'
 
 const MCP_USAGE = 'Usage: /mcp [status|reconnect|enable|disable] [server]'
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error)
-}
 
 function success(text) {
   return { kind: 'success', text }
@@ -24,8 +22,14 @@ function describeServer(server) {
   return server.message === undefined ? line : `${line} — ${server.message}`
 }
 
-function statusText(manager) {
+function statusText(manager, name) {
   const { servers } = manager.statusSnapshot()
+  if (name !== undefined) {
+    const server = servers.find((entry) => entry.name === name)
+    return server === undefined
+      ? `No status reported for ${JSON.stringify(name)} yet.`
+      : describeServer(server)
+  }
   if (servers.length === 0) return 'No MCP Servers configured.'
   return servers.map(describeServer).join('\n')
 }
@@ -48,14 +52,22 @@ async function reconnectServer(manager, name) {
 /**
  * Writes the global Config layer through the settings scope. The scope's
  * `update` merges the patch deeply, so sibling Servers and untouched fields
- * of the target Server survive.
+ * of the target Server survive. A workspace-sourced Server is refused: its
+ * workspace entry would shadow the global write, so the file must change.
  */
 async function setServerDisabled(settingsScope, name, disabled) {
   if (!Object.hasOwn(settingsScope.get().mcpServers ?? {}, name)) {
     throw new Error(`Unknown MCP server ${JSON.stringify(name)}`)
   }
+  if (settingsScope.layerSnapshot?.().source?.[name] === 'workspace') {
+    throw new Error(
+      `Server ${name} is defined by the workspace .dsh/mcp.json; edit that file to change it`,
+    )
+  }
   await settingsScope.update({ mcpServers: { [name]: { disabled } } })
-  return disabled ? `Server ${name} disabled.` : `Server ${name} enabled.`
+  return disabled
+    ? `Server ${name} disabled in the global Config.`
+    : `Server ${name} enabled in the global Config.`
 }
 
 async function handleMcpCommand(invocation, manager, settingsScope) {
@@ -66,6 +78,12 @@ async function handleMcpCommand(invocation, manager, settingsScope) {
 
     if (subcommand === 'status' && args.length === 0) {
       return success(statusText(manager))
+    }
+    if (subcommand === 'status' && args.length === 1) {
+      if (!Object.hasOwn(settingsScope.get().mcpServers ?? {}, args[0])) {
+        throw new Error(`Unknown MCP server ${JSON.stringify(args[0])}`)
+      }
+      return success(statusText(manager, args[0]))
     }
     if (subcommand === 'reconnect' && args.length === 1) {
       return success(await reconnectServer(manager, args[0]))

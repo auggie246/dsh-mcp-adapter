@@ -5,6 +5,7 @@ import { once } from 'node:events'
 import test from 'node:test'
 
 import { createFileTokenStore, startOAuthFlow } from '../src/host/oauth.js'
+import { installMcpOauth } from '../src/host/oauth-service.js'
 
 function memoryDeps() {
   const files = new Map()
@@ -357,6 +358,53 @@ test('a login always produces a fresh authorization URL even when signed in', as
     const record = await promise
     assert.equal(record.accessToken, 'at-1')
     assert.equal(record.refreshToken, 'rt-1')
+  } finally {
+    await auth.close()
+  }
+})
+
+test('a completed sign-in reconnects the Server through the manager', async () => {
+  const auth = await createFakeAuthServer()
+  try {
+    const store = createStore()
+    const manager = {
+      disconnects: [],
+      reconnects: [],
+      async disconnect(name, reason) {
+        this.disconnects.push([name, reason])
+      },
+      async listTools(name) {
+        this.reconnects.push(name)
+        return { tools: [] }
+      },
+    }
+    const oauth = installMcpOauth(
+      { effect() {}, logger: { warn() {} } },
+      manager,
+      {
+        get: () => ({
+          mcpServers: {
+            remote: {
+              url: auth.serverUrl,
+              auth: 'oauth',
+              scopes: ['read', 'write'],
+              disabled: false,
+            },
+          },
+        }),
+      },
+      { store },
+    )
+    const login = await oauth.startLogin('remote')
+    const response = await completeBrowserStep(new URL(login.authorizationUrl))
+    assert.equal(response.status, 200)
+
+    for (let i = 0; i < 500 && manager.reconnects.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.ok(await store.get('remote'), 'the flow persisted tokens')
+    assert.deepEqual(manager.disconnects, [['remote', 'oauth login']])
+    assert.deepEqual(manager.reconnects, ['remote'])
   } finally {
     await auth.close()
   }

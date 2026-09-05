@@ -188,3 +188,49 @@ test('a persisted Promotion connects once at startup, registers natively, then i
   // The rebuilt native tool outlives the idle disconnect.
   assert.ok(tools.definitions.has('promoted__ping'))
 })
+
+test('re-enabling a Server with a persisted Promotion reconnects it once', async (t) => {
+  const scope = new MemoryScope({
+    mcpServers: {
+      promoted: serverConfig({ promotedTools: ['ping'], disabled: true }),
+    },
+  })
+  const { connectedNames, connections, scheduler, manager } = restartedStack(scope)
+  const tools = toolRegistry()
+  const registry = new McpPromotionRegistry(
+    { tools, logger: { warn() {} }, get() {} },
+    manager,
+    scope,
+  )
+  t.after(async () => {
+    await registry.dispose()
+    await manager.dispose()
+  })
+
+  await registry.settled()
+
+  // A disabled Server connects nowhere at startup.
+  assert.deepEqual(connectedNames, [])
+  assert.equal(tools.definitions.size, 0)
+
+  // Re-enable runs the same Promotion discovery through the settings watch:
+  // exactly one connect rebuilds the native input schema, then the normal
+  // idle schedule applies.
+  await scope.replace({
+    mcpServers: {
+      promoted: serverConfig({ promotedTools: ['ping'] }),
+    },
+  })
+  await registry.settled()
+
+  assert.deepEqual(connectedNames, ['promoted'])
+  assert.equal(connections.length, 1)
+  assert.ok(tools.definitions.get('promoted__ping'))
+
+  const idleTasks = scheduler.active()
+  assert.equal(idleTasks.length, 1)
+  assert.equal(idleTasks[0].delay, 600_000)
+  await scheduler.runNext()
+  assert.equal(connections[0].closed, true)
+  assert.ok(tools.definitions.has('promoted__ping'))
+})

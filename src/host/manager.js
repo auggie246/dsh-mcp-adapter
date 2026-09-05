@@ -601,7 +601,9 @@ export function installMcpManagerRpc(ctx, manager, options = {}) {
             },
           }
         }
-        return { ok: true, value: layerSnapshot() }
+        // The snapshot may be async (the wiring refreshes the workspace layer
+        // first, which gives the layers poll a real refresh path).
+        return { ok: true, value: await layerSnapshot() }
       }
       if (endpoint === 'oauth-login' || endpoint === 'oauth-logout' || endpoint === 'oauth-status') {
         if (

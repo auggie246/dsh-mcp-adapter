@@ -200,3 +200,21 @@ test('oauth-login hands the authorization URL to the Client response', async () 
     value: { authorizationUrl: 'https://auth.example.test/authorize?state=abc' },
   })
 })
+
+test('oauth-logout refuses a Server that does not use OAuth and deletes nothing', async () => {
+  const store = memoryStore({
+    remote: { url: 'https://a.test/api', accessToken: 'at-1' },
+  })
+  const { oauth, manager } = controllerHarness({
+    servers: { remote: { command: 'node', auth: 'headers', disabled: false } },
+    store,
+  })
+  const { handler } = createRpcHarness({ oauth })
+
+  const result = await handler('oauth-logout', { server: 'remote' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'mcp-oauth-failed')
+  assert.match(result.error.message, /does not use OAuth authentication/)
+  assert.deepEqual(await store.get('remote'), { url: 'https://a.test/api', accessToken: 'at-1' })
+  assert.deepEqual(manager.disconnects, [])
+})

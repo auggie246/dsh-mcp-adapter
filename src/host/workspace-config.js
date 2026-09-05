@@ -3,13 +3,10 @@ import { readFile as fsReadFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { McpServerSchema, validateMcpSettings } from './settings.js'
+import { errorMessage } from './errors.js'
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function messageOf(error) {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function workspaceConfigPath(workspaceRoot) {
@@ -41,14 +38,14 @@ export async function readWorkspaceConfig(workspaceRoot, deps = {}) {
     text = await readFile(file)
   } catch (error) {
     if (error?.code === 'ENOENT') return { servers: {} }
-    return { error: `could not read ${file}: ${messageOf(error)}` }
+    return { error: `could not read ${file}: ${errorMessage(error)}` }
   }
 
   let parsed
   try {
     parsed = JSON.parse(text)
   } catch (error) {
-    return { error: `${file} is not valid JSON: ${messageOf(error)}` }
+    return { error: `${file} is not valid JSON: ${errorMessage(error)}` }
   }
 
   if (!isRecord(parsed)) {
@@ -72,7 +69,7 @@ export async function readWorkspaceConfig(workspaceRoot, deps = {}) {
     }
     validate({ mcpServers: servers })
   } catch (error) {
-    return { error: `${file}: ${messageOf(error)}` }
+    return { error: `${file}: ${errorMessage(error)}` }
   }
   return { servers }
 }
@@ -114,6 +111,15 @@ function defaultWatchDirectory(directory, onChange) {
 }
 
 /**
+ * Config facts the wire may carry about one workspace Server: the resolved
+ * entry minus every `secret`-role field (`env`, `headers`).
+ */
+function publicServerSummary(config) {
+  const { env, headers, ...summary } = config
+  return summary
+}
+
+/**
  * Wrap the registered global Config scope with the workspace layer.
  *
  * `get()` returns the merged namespace value and `layerSnapshot()` reports
@@ -122,7 +128,8 @@ function defaultWatchDirectory(directory, onChange) {
  * changed. `update()` and `mutate()` forward to the global scope only: the
  * Settings page writes global Config and never the workspace file. The
  * workspace file is re-read when the global scope notifies, when the `.dsh`
- * directory changes (when `fs.watch` is available), and on `refreshLayers()`.
+ * directory changes (until `.dsh` exists, the workspace root is watched and
+ * the `.dsh` watch is armed on its first event), and on `refreshLayers()`.
  */
 export function createLayeredScope(globalScope, options = {}) {
   const {
@@ -137,7 +144,8 @@ export function createLayeredScope(globalScope, options = {}) {
 
   let layer = { servers: {}, error: undefined }
   let disposed = false
-  let unwatchDirectory
+  let unwatchDsh
+  let unwatchRoot
   let refreshTail = Promise.resolve()
   const listeners = new Set()
 
@@ -195,14 +203,42 @@ export function createLayeredScope(globalScope, options = {}) {
 
   const unwatchGlobal = globalScope.watch(() => refresh())
 
-  if (typeof watchDirectory === 'function') {
+  // The `.dsh` directory may not exist when the Adapter starts. In that case
+  // watch the workspace root instead and upgrade to the `.dsh` watch as soon
+  // as an event suggests the directory appeared, so a workspace file created
+  // after startup is still seen.
+  const onLayerEvent = () => refresh()
+  const closeHandle = (close) => {
     try {
-      const stop = watchDirectory(join(workspaceRoot, '.dsh'), () => refresh())
-      if (typeof stop === 'function') unwatchDirectory = stop
+      close?.()
     } catch {
-      // Watching is unavailable on this platform or the directory is absent;
-      // global changes and refreshLayers() still refresh the layer.
-      unwatchDirectory = undefined
+      // Closing a watcher must never break disposal.
+    }
+  }
+  const tryWatchDsh = () => {
+    if (typeof watchDirectory !== 'function' || unwatchDsh !== undefined) return false
+    try {
+      const stop = watchDirectory(join(workspaceRoot, '.dsh'), onLayerEvent)
+      if (typeof stop !== 'function') return false
+      unwatchDsh = stop
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (!tryWatchDsh()) {
+    try {
+      const stop = watchDirectory(workspaceRoot, () => {
+        refresh()
+        if (unwatchDsh === undefined && tryWatchDsh()) {
+          closeHandle(unwatchRoot)
+          unwatchRoot = undefined
+        }
+      })
+      if (typeof stop === 'function') unwatchRoot = stop
+    } catch {
+      // Watching is unavailable on this platform; global changes and
+      // refreshLayers() still refresh the layer.
     }
   }
 
@@ -212,8 +248,10 @@ export function createLayeredScope(globalScope, options = {}) {
     if (disposed) return
     disposed = true
     unwatchGlobal?.()
-    unwatchDirectory?.()
-    unwatchDirectory = undefined
+    closeHandle(unwatchDsh)
+    closeHandle(unwatchRoot)
+    unwatchDsh = undefined
+    unwatchRoot = undefined
     listeners.clear()
   }
 
@@ -234,7 +272,14 @@ export function createLayeredScope(globalScope, options = {}) {
     },
     layerSnapshot() {
       const { sources } = mergeMcpConfigs(globalScope.get().mcpServers, layer.servers)
-      return { source: sources, error: layer.error }
+      // `servers` carries the sanitized workspace-side Config so the Settings
+      // page can render workspace-only Servers (and their OAuth actions)
+      // without any secret-role field ever crossing the wire.
+      const servers = {}
+      for (const [name, config] of Object.entries(layer.servers)) {
+        servers[name] = publicServerSummary(config)
+      }
+      return { source: sources, error: layer.error, servers }
     },
     refreshLayers: () => refresh(),
     dispose,

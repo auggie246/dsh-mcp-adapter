@@ -286,6 +286,10 @@ test('get returns the merged namespace value with per-Server sources', async () 
   assert.deepEqual(layer.layerSnapshot(), {
     source: { shared: 'workspace', onlyGlobal: 'global', onlyWorkspace: 'workspace' },
     error: undefined,
+    servers: {
+      shared: (({ env, headers, ...rest }) => rest)(stdioConfig({ command: 'bun' })),
+      onlyWorkspace: (({ env, headers, ...rest }) => rest)(stdioConfig({ command: 'workspace' })),
+    },
   })
   layer.dispose()
 })
@@ -447,4 +451,68 @@ test('installWorkspaceLayer registers the layer on the context fiber', () => {
   assert.equal(effects.length, 1)
   assert.match(effects[0].name, /workspace/)
   effects[0].dispose()
+})
+
+test('a .dsh directory created after startup upgrades the watch from the workspace root', async () => {
+  const scope = new FakeGlobalScope({ mcpServers: {} })
+  const file = fakeConfigFile(missingFileError())
+  const state = { calls: 0, rootStops: 0, dshDirectories: [] }
+  let rootListener
+  let dshListener
+  const watch = (directory, onChange) => {
+    state.calls += 1
+    if (state.calls === 1) throw new Error('ENOENT: .dsh does not exist yet')
+    if (String(directory).endsWith('.dsh')) {
+      state.dshDirectories.push(directory)
+      dshListener = onChange
+      return () => {}
+    }
+    rootListener = onChange
+    return () => {
+      state.rootStops += 1
+    }
+  }
+  const layer = createLayeredScope(scope, {
+    workspaceRoot: '/root',
+    readFile: file.read,
+    watchDirectory: watch,
+  })
+  await layer.refreshLayers()
+  assert.equal(state.calls, 2, 'the root fallback watch is armed when .dsh is absent')
+
+  file.state.body = JSON.stringify({ mcpServers: { late: stdioConfig({ command: 'late' }) } })
+  await rootListener('change', '.dsh')
+  await layer.refreshLayers()
+  assert.equal(layer.get().mcpServers.late.command, 'late')
+  assert.equal(state.rootStops, 1, 'the root fallback watch is closed after the upgrade')
+  assert.equal(state.dshDirectories.length, 1, 'the .dsh watch is armed')
+
+  layer.dispose()
+})
+
+test('layerSnapshot reports sanitized workspace Servers without secret fields', async () => {
+  const scope = new FakeGlobalScope({ mcpServers: {} })
+  const file = fakeConfigFile(JSON.stringify({
+    mcpServers: {
+      demo: {
+        url: 'https://mcp.example.test/api',
+        headers: { Authorization: 'Bearer secret-value' },
+      },
+    },
+  }))
+  const layer = createLayeredScope(scope, {
+    workspaceRoot: '/root',
+    readFile: file.read,
+    watchDirectory: noDirectoryWatch(),
+  })
+  await layer.refreshLayers()
+
+  const snapshot = layer.layerSnapshot()
+  assert.equal(snapshot.source.demo, 'workspace')
+  assert.equal(snapshot.servers.demo.url, 'https://mcp.example.test/api')
+  assert.equal(snapshot.servers.demo.env, undefined)
+  assert.equal(snapshot.servers.demo.headers, undefined)
+  assert.equal(JSON.stringify(snapshot).includes('secret-value'), false)
+
+  layer.dispose()
 })

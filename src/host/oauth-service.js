@@ -1,8 +1,5 @@
 import { startOAuthFlow } from './oauth.js'
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error)
-}
+import { errorMessage } from './errors.js'
 
 /**
  * Host controller for OAuth sign-in of one Adapter: per-Server pending-flow
@@ -81,9 +78,13 @@ export function installMcpOauth(ctx, manager, settingsScope, { store } = {}) {
       const flow = raw.then(
         () => {
           forgetIfCurrent(serverName, entry)
+          // Reconnect with the fresh tokens right away: the manual reconnect
+          // path (disconnect, then list tools) works for every lifecycle —
+          // lazy, eager, and both keep-alive modes.
           return manager
             .disconnect(serverName, 'oauth login')
             .catch(() => undefined)
+            .then(() => manager.listTools(serverName).catch(() => undefined))
         },
         (error) => {
           forgetIfCurrent(serverName, entry)
@@ -119,6 +120,11 @@ export function installMcpOauth(ctx, manager, settingsScope, { store } = {}) {
       const config = settingsScope.get().mcpServers[serverName]
       if (config === undefined) {
         throw new Error(`Unknown MCP server ${JSON.stringify(serverName)}`)
+      }
+      if (config.auth !== 'oauth') {
+        throw new Error(
+          `MCP server ${JSON.stringify(serverName)} does not use OAuth authentication`,
+        )
       }
       const entry = entries.get(serverName)
       if (entry !== undefined) {

@@ -6,13 +6,11 @@ import { dirname, join } from 'node:path'
 
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js'
 
+import { errorMessage } from './errors.js'
+
 export const OAUTH_FLOW_TIMEOUT_MS = 5 * 60_000
 const TOKENS_FILE = join('mcp-auth', 'tokens.json')
 const CALLBACK_PATH = '/callback'
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error)
-}
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

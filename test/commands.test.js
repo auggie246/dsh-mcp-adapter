@@ -278,7 +278,7 @@ test('disable records the Config path write and reports the new state', async (t
   await manager.listTools('alpha')
   assert.deepEqual(await state.definition.handler(invocation('disable alpha')), {
     kind: 'success',
-    text: 'Server alpha disabled.',
+    text: 'Server alpha disabled in the global Config.',
   })
 
   assert.deepEqual(scope.updates, [{ mcpServers: { alpha: { disabled: true } } }])
@@ -298,7 +298,7 @@ test('enable clears the disabled flag and restores the lazy state', async (t) =>
   assert.equal(manager.statusSnapshot().servers[0].state, 'disabled')
   assert.deepEqual(await state.definition.handler(invocation('enable alpha')), {
     kind: 'success',
-    text: 'Server alpha enabled.',
+    text: 'Server alpha enabled in the global Config.',
   })
 
   assert.deepEqual(scope.updates, [{ mcpServers: { alpha: { disabled: false } } }])
@@ -331,7 +331,7 @@ test('unknown subcommands and malformed arguments settle as usage errors', async
 
   for (const rawInput of [
     'restart alpha',
-    'status extra',
+    'status alpha beta',
     'reconnect',
     'reconnect alpha beta',
     'enable',
@@ -356,4 +356,40 @@ test('a Config write failure settles as an error result instead of throwing', as
   const result = await state.definition.handler(invocation('disable alpha'))
   assert.equal(result.kind, 'error')
   assert.match(result.text, /settings locked/)
+})
+
+test('status reports one Server by name and rejects unknown names', async (t) => {
+  const scope = new RecordingScope({ mcpServers: { alpha: serverConfig() } })
+  const { manager } = await startManager(scope, { alpha: [tool('one')] })
+  t.after(() => manager.dispose())
+  const { ctx, state } = commandContext()
+  installMcpCommands(ctx, manager, scope)
+  await manager.listTools('alpha')
+
+  const known = await state.definition.handler(invocation('status alpha'))
+  assert.equal(known.kind, 'success')
+  assert.equal(known.text, 'alpha — connected (1 tool)')
+
+  const unknown = await state.definition.handler(invocation('status nope'))
+  assert.equal(unknown.kind, 'error')
+  assert.match(unknown.text, /nope/)
+})
+
+test('enable and disable refuse a workspace-sourced Server without writing Config', async (t) => {
+  const scope = new RecordingScope({ mcpServers: { alpha: serverConfig() } })
+  const { manager } = await startManager(scope)
+  t.after(() => manager.dispose())
+  const layered = {
+    get: () => scope.get(),
+    watch: (listener) => scope.watch(listener),
+    update: (patch) => scope.update(patch),
+    layerSnapshot: () => ({ source: { alpha: 'workspace' } }),
+  }
+  const { ctx, state } = commandContext()
+  installMcpCommands(ctx, manager, layered)
+
+  const result = await state.definition.handler(invocation('disable alpha'))
+  assert.equal(result.kind, 'error')
+  assert.match(result.text, /workspace \.dsh\/mcp\.json/)
+  assert.deepEqual(scope.updates, [])
 })

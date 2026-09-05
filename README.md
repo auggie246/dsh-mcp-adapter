@@ -43,7 +43,7 @@ The workspace file uses the same `mcpServers` shape and validation as the global
 
 Open **Settings > MCP** to add, import, edit, reconnect, disable, or delete a Server. The Server list shows live connection state and cached tool counts. The detail panel manages Transport fields, secret values, Auto-allow, the idle timeout, and Promotions. HTTP Servers pick their HTTP authentication mode (static headers or OAuth 2.0 with PKCE) and, for OAuth, enter the scopes to request.
 
-Servers whose Config comes from the workspace `.dsh/mcp.json` show a `workspace` badge in the Server list. Their detail panel explains that the workspace file defines or overrides the Server and disables the save control: edits there write the global layer, which the workspace file overrides.
+Servers whose Config comes from the workspace `.dsh/mcp.json` show a `workspace` badge in the Server list. Their detail panel explains that the workspace file defines or overrides the Server and disables the save control: edits there write the global layer, which the workspace file overrides. A Server defined only in the workspace file gets a read-only detail panel showing its non-secret Config; for an OAuth Server it offers Sign in / Sign out, because sign-in needs no global Config entry.
 
 JSON import accepts the standard `{ "mcpServers": { ... } }` shape. Import replaces matching Server entries and preserves Servers absent from the import.
 
@@ -64,16 +64,17 @@ Changing, disabling, or removing a Server closes its connection, clears its cach
 
 ## Commands
 
-The Host registers one human command, `/mcp`, with four subcommands. A bare `/mcp` or `/mcp status` prints one line per Server: name, live state, cached tool count, and the last message when one is present.
+The Host registers one human command, `/mcp`, with four subcommands. A bare `/mcp` or `/mcp status` prints one line per Server: name, live state, cached tool count, and the last message when one is present. `/mcp status <server>` prints only that Server's line.
 
 ```text
 /mcp                        # status of every Server
+/mcp status filesystem      # status of one Server
 /mcp reconnect filesystem   # close and relist one Server now
 /mcp disable hosted         # keep the Config, stop the Server
 /mcp enable hosted          # restore the lazy lifecycle
 ```
 
-`reconnect` mirrors the `/mcp-adapter` RPC endpoint: it closes the Server's current connection and lists tools so it reconnects. `enable` and `disable` write the global Config's `disabled` flag — the same write as **Settings > MCP** — and leave the Server entry otherwise untouched. An unknown Server, unknown subcommand, or missing argument answers with `Usage: /mcp [status|reconnect|enable|disable] [server]`.
+`reconnect` mirrors the `/mcp-adapter` RPC endpoint: it closes the Server's current connection and lists tools so it reconnects. `enable` and `disable` write the global Config's `disabled` flag — the same write as **Settings > MCP** — say so in their answer, and leave the Server entry otherwise untouched. A Server defined by the workspace `.dsh/mcp.json` is refused, because the workspace entry would shadow a global write ([ADR 0005](./docs/adr/0005-per-workspace-config.md)). An unknown subcommand or wrong argument count answers with `Usage: /mcp [status|reconnect|enable|disable] [server]`; an unknown Server answers with its unknown-server error.
 
 ## OAuth
 
