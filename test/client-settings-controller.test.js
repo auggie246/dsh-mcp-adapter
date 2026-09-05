@@ -157,6 +157,7 @@ test('oauth actions call the RPC endpoints and surface the authorization URL', a
     'oauth-login',
     'oauth-logout',
     'overview',
+    'layers',
     'oauth-status',
     'oauth-status',
   ])
