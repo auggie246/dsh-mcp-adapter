@@ -3,6 +3,19 @@ import {
   createMcpConnection,
 } from './mcp-connection.js'
 
+export const KEEP_ALIVE_RETRY_MS = 30_000
+
+const EAGER_LIFECYCLES = new Set(['eager', 'keep-alive'])
+const KEEP_ALIVE_LIFECYCLES = new Set(['keep-alive', 'lazy-keep-alive'])
+
+function connectsAtStartup(lifecycle) {
+  return EAGER_LIFECYCLES.has(lifecycle)
+}
+
+function isKeepAlive(lifecycle) {
+  return KEEP_ALIVE_LIFECYCLES.has(lifecycle)
+}
+
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
 }
@@ -90,6 +103,7 @@ function createRecord(name, config) {
     generation: 0,
     activeCalls: 0,
     cancelIdle: undefined,
+    cancelReconnect: undefined,
     lastUsedAt: undefined,
   }
 }
@@ -123,6 +137,7 @@ export class McpClientManager {
     this.disposed = false
 
     this.installConfig(settingsScope.get())
+    this.scheduleStartupConnects()
     this.unwatch = settingsScope.watch((next) => this.reconcile(next))
   }
 
@@ -159,11 +174,16 @@ export class McpClientManager {
         }
         record.config = next
         if (!mustReconnect && idleTimeoutChanged) this.scheduleIdle(record)
+        if (mustReconnect) this.scheduleStartupConnect(record)
       }
     }
 
     for (const [name, config] of Object.entries(nextServers)) {
-      if (!this.records.has(name)) this.records.set(name, createRecord(name, config))
+      if (!this.records.has(name)) {
+        const record = createRecord(name, config)
+        this.records.set(name, record)
+        this.scheduleStartupConnect(record)
+      }
     }
 
     this.emit()
@@ -243,6 +263,7 @@ export class McpClientManager {
 
   scheduleIdle(record) {
     this.cancelIdle(record)
+    if (isKeepAlive(record.config.lifecycle)) return
     if (
       this.disposed ||
       record.connection === undefined ||
@@ -265,6 +286,57 @@ export class McpClientManager {
   touch(record) {
     record.lastUsedAt = this.now()
     this.scheduleIdle(record)
+  }
+
+  cancelReconnect(record) {
+    record.cancelReconnect?.()
+    record.cancelReconnect = undefined
+  }
+
+  /**
+   * Eager and keep-alive Servers connect without a user request. Connects run
+   * through the fiber-owned schedule so construction and reconcile never block;
+   * ensureConnection already records failures on the record's error state.
+   */
+  scheduleStartupConnects() {
+    for (const record of this.records.values()) this.scheduleStartupConnect(record)
+  }
+
+  scheduleStartupConnect(record) {
+    if (this.disposed || record.config.disabled) return
+    if (!connectsAtStartup(record.config.lifecycle)) return
+    if (record.connection !== undefined || record.connectPromise !== undefined) return
+    this.schedule(async () => {
+      if (this.disposed || record.config.disabled) return
+      if (record.connection !== undefined || record.connectPromise !== undefined) return
+      await this.ensureConnection(record, undefined).catch(() => {
+        // Error state is already recorded; keep-alive retries via onClose.
+      })
+    }, 0)
+  }
+
+  /**
+   * Keep-alive Servers reconnect KEEP_ALIVE_RETRY_MS after an unexpected close
+   * and keep retrying while the guards hold. Closes initiated by the manager
+   * (config change, disable, removal, dispose) bump the generation, so their
+   * onClose callbacks never reach this path; closeRecord also cancels any
+   * pending timer explicitly.
+   */
+  scheduleReconnect(record) {
+    if (this.disposed || record.config.disabled) return
+    if (!isKeepAlive(record.config.lifecycle)) return
+    if (record.connection !== undefined || record.connectPromise !== undefined) return
+    this.cancelReconnect(record)
+    record.cancelReconnect = this.schedule(async () => {
+      record.cancelReconnect = undefined
+      if (this.disposed || record.config.disabled) return
+      if (record.connection !== undefined || record.connectPromise !== undefined) return
+      try {
+        await this.ensureConnection(record, undefined)
+      } catch {
+        this.scheduleReconnect(record)
+      }
+    }, KEEP_ALIVE_RETRY_MS)
   }
 
   callbacksFor(record, generation) {
@@ -292,6 +364,7 @@ export class McpClientManager {
         record.transportType = undefined
         this.cancelIdle(record)
         this.setState(record, 'disconnected', 'Connection closed')
+        this.scheduleReconnect(record)
       },
     }
   }
@@ -412,6 +485,7 @@ export class McpClientManager {
   async closeRecord(record) {
     record.generation += 1
     this.cancelIdle(record)
+    this.cancelReconnect(record)
     record.connectAbort?.abort()
     record.connectAbort = undefined
     const connection = record.connection

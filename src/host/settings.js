@@ -34,9 +34,14 @@ export const McpServerSchema = z
       .default(false)
       .description('Run this server’s tool calls without DSH approval prompts.'),
     lifecycle: z
-      .union(['lazy'])
+      .union(['lazy', 'eager', 'keep-alive', 'lazy-keep-alive'])
       .default('lazy')
-      .description('Connection lifecycle. Version 1 supports lazy only.'),
+      .description(
+        'Connection lifecycle: lazy (connect on first use, disconnect after idle '
+        + 'timeout), eager (connect at startup, idle timeout still applies), '
+        + 'keep-alive (connect at startup, never idle out, auto-reconnect), or '
+        + 'lazy-keep-alive (connect on first use, never idle out, auto-reconnect).',
+      ),
     idleTimeoutMinutes: z
       .number()
       .default(10)

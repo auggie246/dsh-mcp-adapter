@@ -145,10 +145,14 @@ test('rejects invalid or mismatched transport details', () => {
   )
 })
 
-test('rejects invalid lifecycle values, idle timeouts, and promotions', () => {
+test('accepts every lifecycle value and rejects invalid ones', () => {
+  for (const lifecycle of ['lazy', 'eager', 'keep-alive', 'lazy-keep-alive']) {
+    const config = resolve({ mcpServers: { demo: { command: 'node', lifecycle } } })
+    assert.equal(config.mcpServers.demo.lifecycle, lifecycle)
+  }
   assert.throws(
-    () => resolve({ mcpServers: { demo: { command: 'node', lifecycle: 'eager' } } }),
-    /expected "lazy"/,
+    () => resolve({ mcpServers: { demo: { command: 'node', lifecycle: 'aggressive' } } }),
+    /expected "lazy" \| "eager" \| "keep-alive" \| "lazy-keep-alive" but got "aggressive"/,
   )
   assert.throws(
     () => resolve({ mcpServers: { demo: { command: 'node', idleTimeoutMinutes: 0 } } }),
