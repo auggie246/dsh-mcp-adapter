@@ -1,6 +1,6 @@
 {
   "name": "@auggieteo/dsh-mcp-adapter",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "DSH plugin connecting the agent to MCP servers through one mcp proxy tool and a Settings > MCP page.",
   "type": "module",
   "license": "MIT",
@@ -15,6 +15,7 @@
     "lib/client.js",
     "lib/client.js.map",
     "cordis.patch.yml",
+    "CHANGELOG.md",
     "CONTEXT.md",
     "docs/adr/",
     "docs/verification/",
