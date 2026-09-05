@@ -69,8 +69,8 @@ export const MCP_SETTINGS_CSS = `
 .mcp-promotion-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
 .mcp-promotion-description{display:block;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:17px}
 .mcp-empty{padding:30px 20px;text-align:center;display:flex;align-items:center;flex-direction:column;gap:10px}
-.mcp-overlay{position:fixed;inset:0;background:var(--dsw-alias-bg-mask-1);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1200;animation:mcp-fade .12s ease}
-.mcp-modal-card{width:min(560px,100%);max-height:min(760px,90vh);overflow:auto;padding:18px;display:flex;flex-direction:column;gap:13px;border:1px solid var(--dsw-alias-border-l1);border-radius:14px;background:var(--dsw-alias-bg-overlay);box-shadow:0 18px 60px rgba(0,0,0,.32);animation:mcp-pop .16s ease}
+.mcp-overlay{position:fixed;inset:0;background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1200;animation:mcp-fade .12s ease}
+.mcp-modal-card{width:min(560px,100%);max-height:min(760px,90vh);overflow:auto;padding:18px;display:flex;flex-direction:column;gap:13px;border:0;border-radius:14px;background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-prominent);animation:mcp-pop .16s ease}
 @keyframes mcp-fade{from{opacity:0}to{opacity:1}}
 @keyframes mcp-pop{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
 .mcp-modal-title{margin:0;font-size:15px;line-height:22px;font-weight:600}

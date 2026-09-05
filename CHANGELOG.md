@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The Add Server and Import JSON dialogs follow the host dialog theme again: the modal card now surfaces on `bg-layer-2` with the shared `--dsw-elevation-prominent` treatment and the overlay mask blurs like the host Modal primitive, instead of the off-palette `bg-overlay` fill and a hardcoded drop shadow.
+
 ## [v0.2.0] - 2026-09-05
 
 Everything from v0.1.2 through this release: the six deferred v1 features (#8–#12, #14), the dual-generation DSH compatibility fix, and the standard-readme documentation pass.
