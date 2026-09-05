@@ -308,6 +308,93 @@ test('Connection RPC exposes detached status and catalog snapshots', async () =>
   assert.equal((await registration.handler('missing')).ok, false)
 })
 
+test('resource and prompt methods connect lazily and return detached JSON', async () => {
+  const resources = {
+    resources: [
+      {
+        uri: 'file:///docs/readme.md',
+        name: 'readme.md',
+        description: 'Docs',
+        mimeType: 'text/markdown',
+      },
+    ],
+  }
+  const templates = {
+    resourceTemplates: [{ uriTemplate: 'file:///docs/{path}', name: 'docs' }],
+  }
+  const readResult = {
+    contents: [{ uri: 'file:///docs/readme.md', mimeType: 'text/markdown', text: '# hello' }],
+  }
+  const prompts = {
+    prompts: [{ name: 'review', description: 'Review code', arguments: [{ name: 'path' }] }],
+  }
+  const promptResult = {
+    messages: [{ role: 'user', content: { type: 'text', text: 'Review the code.' } }],
+  }
+  const calls = []
+  let connectionCount = 0
+  const scope = new MemoryScope({ mcpServers: { demo: serverConfig() } })
+  const scheduler = new ManualScheduler()
+  const manager = new McpClientManager(scope, {
+    schedule: scheduler.schedule.bind(scheduler),
+    connectionFactory: async () => {
+      connectionCount += 1
+      return {
+        transportType: 'test',
+        client: {
+          async listTools() { return { tools: [] } },
+          async listResources(params, options) {
+            calls.push(['listResources', params, options])
+            return structuredClone(resources)
+          },
+          async readResource(params, options) {
+            calls.push(['readResource', params, options])
+            return structuredClone(readResult)
+          },
+          async listResourceTemplates(params, options) {
+            calls.push(['listResourceTemplates', params, options])
+            return structuredClone(templates)
+          },
+          async listPrompts(params, options) {
+            calls.push(['listPrompts', params, options])
+            return structuredClone(prompts)
+          },
+          async getPrompt(params, options) {
+            calls.push(['getPrompt', params, options])
+            return structuredClone(promptResult)
+          },
+        },
+        async close() {},
+      }
+    },
+  })
+
+  assert.deepEqual(await manager.listResources('demo'), resources)
+  assert.deepEqual(await manager.readResource('demo', 'file:///docs/readme.md'), readResult)
+  assert.deepEqual(await manager.listTemplates('demo'), templates)
+  assert.deepEqual(await manager.listPrompts('demo'), prompts)
+  assert.deepEqual(await manager.getPrompt('demo', 'review', { path: 'x' }), promptResult)
+
+  assert.equal(connectionCount, 1)
+  assert.deepEqual(calls[1][1], { uri: 'file:///docs/readme.md' })
+  assert.deepEqual(calls[4][1], { name: 'review', arguments: { path: 'x' } })
+  assert.equal(calls.every(([, , options]) => options.timeout === 30_000), true)
+
+  // No metadata caching for resources or prompts: the tool cache stays empty.
+  assert.deepEqual(manager.getCachedTools('demo'), [])
+  assert.equal(manager.statusSnapshot().servers[0].toolCount, 0)
+
+  // Detached JSON: callers can mutate their snapshot without touching the record.
+  const detached = await manager.listResources('demo')
+  detached.resources[0].name = 'mutated'
+  assert.equal((await manager.listResources('demo')).resources[0].name, 'readme.md')
+
+  await assert.rejects(manager.listResources('missing'), /Unknown MCP server/)
+  await assert.rejects(manager.getPrompt('missing', 'review', {}), /Unknown MCP server/)
+
+  await manager.dispose()
+})
+
 test('callTool delegates arguments and returns detached JSON', async () => {
   const scope = new MemoryScope({ mcpServers: { demo: serverConfig() } })
   const scheduler = new ManualScheduler()

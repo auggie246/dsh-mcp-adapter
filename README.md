@@ -65,17 +65,21 @@ The Host registers one human command, `/mcp`, with four subcommands. A bare `/mc
 
 ## Proxy Tool
 
-The Host registers one global `mcp` tool with three actions:
+The Host registers one global `mcp` tool with seven actions:
 
 ```text
 mcp({ action: "search", query: "screenshot" })
 mcp({ action: "describe", server: "browser", tool: "take_screenshot" })
 mcp({ action: "call", server: "browser", tool: "take_screenshot", args: {} })
+mcp({ action: "resources", server: "browser" })
+mcp({ action: "read", server: "browser", uri: "file:///docs/readme.md" })
+mcp({ action: "prompts", server: "browser" })
+mcp({ action: "prompt", server: "browser", name: "review", args: { path: "src/index.js" } })
 ```
 
 Search results use `<server>__<tool>` names to avoid collisions. The first search fills empty metadata caches; later search and describe operations use the cache. Call requests ask for DSH approval unless that Server has `autoAllow: true`.
 
-Call, search, and describe output is limited to 50 KiB and 2,000 lines. Larger text uses `spillStore` for a full-result reference. Raw structured details larger than 16 KiB become a compact summary with their own spill reference.
+All action output is limited to 50 KiB and 2,000 lines. Larger text uses `spillStore` for a full-result reference. Raw structured details larger than 16 KiB become a compact summary with their own spill reference.
 
 ## Promotion
 
@@ -84,6 +88,26 @@ Add a raw MCP tool name to a Server's `promotedTools` list to register `<server>
 Promotion changes apply through `settings/updated`. They do not restart a connected Server. Removing a Promotion unregisters its native tool. Non-promoted tools remain available only through the `mcp` Proxy Tool.
 
 DSH native tool names must match `[A-Za-z0-9_-]` and contain at most 64 characters. The Adapter logs a warning and skips an invalid or colliding Promotion name.
+
+## Resources and prompts
+
+Servers that expose MCP resources and prompts surface through the `mcp` Proxy Tool. There are no per-resource native tools and no browse UI.
+
+`mcp({ action: "resources", server: "docs" })` lists one Server's resources as `uri`, `name`, `description`, and `mimeType`, plus its resource templates when the Server exposes them. `mcp({ action: "read", server: "docs", uri: "..." })` reads one resource. Text content flows inline through the same output guard as tool calls.
+
+Binary (`blob`) resource content is never inlined as base64. It is base64-decoded and written to a new `mcp-resource-` directory under the system temp folder; the file name is sanitized from the resource URI, and the result reports the file `path` and byte `size`.
+
+`mcp({ action: "prompts", server: "docs" })` lists one Server's prompts as `name`, `description`, and `arguments`. `mcp({ action: "prompt", server: "docs", name: "review", args: {} })` fetches one prompt and formats its messages as `role: text` lines.
+
+Prompts also surface as one human command on the DSH command registry:
+
+```text
+/mcp-prompt <server> <prompt> [json-args]
+```
+
+For example, `/mcp-prompt docs review {"path": "src/index.js"}`. Empty input, invalid JSON arguments, unknown Servers, and failed fetches answer with error text; success prints the formatted messages.
+
+Resource and prompt metadata is never cached: every action connects lazily and hits the live Server, so results reflect the Server's current state and an offline Server fails with a setup hint.
 
 ## Install
 

@@ -1,9 +1,15 @@
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+
 import { guardMcpOutput } from './output-guard.js'
 
 const MAX_SEARCH_RESULTS = 20
 const APPROVAL_PREVIEW_CHARS = 600
 const SENSITIVE_KEY = /token|secret|password|authorization|api[_-]?key|cookie/i
-const PROXY_FIELDS = new Set(['action', 'query', 'server', 'tool', 'args'])
+const PROXY_FIELDS = new Set(['action', 'query', 'server', 'tool', 'args', 'uri', 'name'])
+const RESOURCE_DIR_PREFIX = 'mcp-resource-'
+const DEFAULT_RESOURCE_FS = { mkdtemp, writeFile }
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -164,7 +170,7 @@ function setupHint(manager, serverName, error) {
   return `${base}\nSetup hint: check this Server's Config in Settings > MCP.`
 }
 
-async function listServerTools(manager, serverName, signal, refresh = false) {
+function requireKnownServer(manager, serverName) {
   const config = manager.getServerConfig(serverName)
   if (config === undefined) {
     const names = manager.catalogSnapshot().servers.map((server) => server.name)
@@ -173,6 +179,11 @@ async function listServerTools(manager, serverName, signal, refresh = false) {
         suggestionText(suggestions(names, serverName)),
     )
   }
+  return config
+}
+
+async function listServerTools(manager, serverName, signal, refresh = false) {
+  requireKnownServer(manager, serverName)
   try {
     return await manager.listTools(serverName, { signal, refresh })
   } catch (error) {
@@ -312,6 +323,278 @@ async function describeAction(ctx, manager, serverName, requested, exec) {
   }
 }
 
+function sanitizeResourceFileName(uri) {
+  let raw = typeof uri === 'string' ? uri : ''
+  try {
+    raw = decodeURIComponent(raw)
+  } catch {
+    // Keep the raw URI when it holds invalid percent escapes.
+  }
+  const segment = raw.split(/[/?#\\]/).filter(Boolean).pop() ?? ''
+  const cleaned = segment
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^\.+/, '_')
+    .slice(0, 80)
+    .replace(/^_+|_+$/g, '')
+  return cleaned === '' ? 'resource' : cleaned
+}
+
+function dedupeFileName(name, used) {
+  if (!used.has(name)) return name
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const extension = dot > 0 ? name.slice(dot) : ''
+  let attempt = 2
+  while (used.has(`${stem}-${attempt}${extension}`)) attempt += 1
+  return `${stem}-${attempt}${extension}`
+}
+
+async function materializeResourceContents(result, deps) {
+  const entries = Array.isArray(result?.contents) ? result.contents : []
+  const contents = []
+  let directory
+  const usedPaths = new Set()
+  for (const entry of entries) {
+    if (!isRecord(entry)) continue
+    if (typeof entry.text === 'string') {
+      contents.push({
+        uri: entry.uri,
+        ...(entry.mimeType === undefined ? {} : { mimeType: entry.mimeType }),
+        text: entry.text,
+      })
+      continue
+    }
+    if (typeof entry.blob !== 'string') continue
+    directory ??= await deps.fs.mkdtemp(path.join(deps.tempRoot, RESOURCE_DIR_PREFIX))
+    const fileName = dedupeFileName(sanitizeResourceFileName(entry.uri), usedPaths)
+    const target = path.join(directory, fileName)
+    const buffer = Buffer.from(entry.blob, 'base64')
+    await deps.fs.writeFile(target, buffer)
+    usedPaths.add(target)
+    contents.push({
+      uri: entry.uri,
+      ...(entry.mimeType === undefined ? {} : { mimeType: entry.mimeType }),
+      path: target,
+      size: buffer.byteLength,
+    })
+  }
+  return contents
+}
+
+function renderResourceContent(content) {
+  if (typeof content.text === 'string') {
+    return `[resource ${content.uri ?? 'unknown'}]\n${content.text}`
+  }
+  return (
+    `[binary resource ${content.uri ?? 'unknown'}` +
+    ` (${content.mimeType ?? 'unknown media type'}, ${content.size ?? 0} bytes)` +
+    ` saved to ${content.path}]`
+  )
+}
+
+function renderResourceReadText(contents) {
+  if (contents.length === 1 && typeof contents[0].text === 'string') return contents[0].text
+  if (contents.length === 0) return '(empty resource)'
+  return contents.map(renderResourceContent).join('\n')
+}
+
+function pickResource(resource) {
+  return {
+    uri: resource.uri,
+    name: resource.name,
+    ...(resource.description === undefined ? {} : { description: resource.description }),
+    ...(resource.mimeType === undefined ? {} : { mimeType: resource.mimeType }),
+  }
+}
+
+function pickTemplate(template) {
+  return {
+    uriTemplate: template.uriTemplate,
+    name: template.name,
+    ...(template.description === undefined ? {} : { description: template.description }),
+    ...(template.mimeType === undefined ? {} : { mimeType: template.mimeType }),
+  }
+}
+
+function pickPrompt(prompt) {
+  return {
+    name: prompt.name,
+    ...(prompt.description === undefined ? {} : { description: prompt.description }),
+    ...(prompt.arguments === undefined ? {} : { arguments: prompt.arguments }),
+  }
+}
+
+function resourceLine(entry) {
+  const parts = [entry.uri ?? entry.uriTemplate, entry.name]
+  if (entry.description) parts.push(entry.description)
+  const line = parts
+    .filter((part) => part !== undefined && part !== '')
+    .map((part) => String(part))
+    .join(' — ')
+  return entry.mimeType === undefined ? line : `${line} (${entry.mimeType})`
+}
+
+function promptLine(prompt) {
+  const parts = [prompt.name]
+  if (prompt.description) parts.push(prompt.description)
+  let line = parts.filter((part) => part !== undefined && part !== '').join(' — ')
+  const argumentNames = Array.isArray(prompt.arguments)
+    ? prompt.arguments
+        .map((argument) => argument?.name)
+        .filter((name) => typeof name === 'string')
+    : []
+  if (argumentNames.length > 0) line += ` (arguments: ${argumentNames.join(', ')})`
+  return line
+}
+
+async function resourcesAction(ctx, manager, serverName, exec) {
+  requireKnownServer(manager, serverName)
+  let resources
+  try {
+    const listed = await manager.listResources(serverName, { signal: exec.signal })
+    resources = (Array.isArray(listed?.resources) ? listed.resources : []).map(pickResource)
+  } catch (error) {
+    throw new Error(setupHint(manager, serverName, error), { cause: error })
+  }
+
+  const result = { resources }
+  try {
+    const listedTemplates = await manager.listTemplates(serverName, { signal: exec.signal })
+    const templates = (
+      Array.isArray(listedTemplates?.resourceTemplates) ? listedTemplates.resourceTemplates : []
+    ).map(pickTemplate)
+    if (templates.length > 0) result.templates = templates
+  } catch {
+    // Resource templates are optional; a Server without them omits the section.
+  }
+
+  const lines = [
+    `Resources on MCP Server ${JSON.stringify(serverName)}:`,
+    ...(resources.length === 0 ? ['(no resources)'] : resources.map(resourceLine)),
+  ]
+  if (result.templates !== undefined) {
+    lines.push('', 'Templates:', ...result.templates.map(resourceLine))
+  }
+  const guarded = await guardMcpOutput(
+    ctx,
+    exec,
+    serverName,
+    'resources',
+    result,
+    lines.join('\n'),
+  )
+  return {
+    action: 'resources',
+    text: guarded.text,
+    data: guarded.data,
+    ...(guarded.guard === undefined ? {} : { guard: guarded.guard }),
+  }
+}
+
+async function readResourceAction(ctx, manager, serverName, uri, exec, deps) {
+  requireKnownServer(manager, serverName)
+  let result
+  try {
+    result = await manager.readResource(serverName, uri, { signal: exec.signal })
+  } catch (error) {
+    throw new Error(setupHint(manager, serverName, error), { cause: error })
+  }
+  const contents = await materializeResourceContents(result, deps)
+  const guarded = await guardMcpOutput(
+    ctx,
+    exec,
+    serverName,
+    'read',
+    { contents },
+    renderResourceReadText(contents),
+  )
+  return {
+    action: 'read',
+    text: guarded.text,
+    data: guarded.data,
+    ...(guarded.guard === undefined ? {} : { guard: guarded.guard }),
+  }
+}
+
+async function promptsAction(ctx, manager, serverName, exec) {
+  requireKnownServer(manager, serverName)
+  let prompts
+  try {
+    const listed = await manager.listPrompts(serverName, { signal: exec.signal })
+    prompts = (Array.isArray(listed?.prompts) ? listed.prompts : []).map(pickPrompt)
+  } catch (error) {
+    throw new Error(setupHint(manager, serverName, error), { cause: error })
+  }
+
+  const result = { prompts }
+  const lines = [
+    `Prompts on MCP Server ${JSON.stringify(serverName)}:`,
+    ...(prompts.length === 0 ? ['(no prompts)'] : prompts.map(promptLine)),
+  ]
+  const guarded = await guardMcpOutput(
+    ctx,
+    exec,
+    serverName,
+    'prompts',
+    result,
+    lines.join('\n'),
+  )
+  return {
+    action: 'prompts',
+    text: guarded.text,
+    data: guarded.data,
+    ...(guarded.guard === undefined ? {} : { guard: guarded.guard }),
+  }
+}
+
+export function renderPromptMessages(result) {
+  const messages = Array.isArray(result?.messages) ? result.messages : []
+  if (messages.length === 0) return '(empty prompt)'
+  return messages
+    .map((message) => {
+      const role = typeof message?.role === 'string' ? message.role : 'unknown'
+      const content = message?.content
+      if (isRecord(content) && typeof content.text === 'string') {
+        return `${role}: ${content.text}`
+      }
+      try {
+        return `${role}: ${JSON.stringify(content) ?? String(content)}`
+      } catch {
+        return `${role}: [unrenderable content]`
+      }
+    })
+    .join('\n')
+}
+
+async function promptAction(ctx, manager, serverName, promptName, args, exec) {
+  requireKnownServer(manager, serverName)
+  let result
+  try {
+    result = await manager.getPrompt(serverName, promptName, args, { signal: exec.signal })
+  } catch (error) {
+    throw new Error(setupHint(manager, serverName, error), { cause: error })
+  }
+
+  const data = {
+    ...(result?.description === undefined ? {} : { description: result.description }),
+    messages: Array.isArray(result?.messages) ? result.messages : [],
+  }
+  const guarded = await guardMcpOutput(
+    ctx,
+    exec,
+    serverName,
+    promptName,
+    data,
+    renderPromptMessages(result),
+  )
+  return {
+    action: 'prompt',
+    text: guarded.text,
+    data: guarded.data,
+    ...(guarded.guard === undefined ? {} : { guard: guarded.guard }),
+  }
+}
+
 async function requireApproval(
   ctx,
   manager,
@@ -410,19 +693,26 @@ export function createMcpCallOutput() {
   }
 }
 
-export function createMcpProxyTool(ctx, manager) {
+export function createMcpProxyTool(ctx, manager, deps = {}) {
+  const resourceDeps = {
+    fs: deps.fs ?? DEFAULT_RESOURCE_FS,
+    tempRoot: deps.tempRoot ?? os.tmpdir(),
+  }
   return {
     name: 'mcp',
     description:
       'Discover and call MCP tools without loading every tool schema. ' +
       'Use action "search" with query first. Use "describe" with server and tool for its schema. ' +
-      'Use "call" with server, tool, and args. Search names use <server>__<tool>.',
+      'Use "call" with server, tool, and args. Search names use <server>__<tool>. ' +
+      'Use "resources" with server to list MCP resources, and "read" with server and uri to read one; ' +
+      'binary resource content is written to a temporary file instead of being inlined. ' +
+      'Use "prompts" with server to list MCP prompts, and "prompt" with server, name, and optional args to fetch one.',
     parameters: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['search', 'describe', 'call'],
+          enum: ['search', 'describe', 'call', 'resources', 'read', 'prompts', 'prompt'],
           description: 'Operation to perform.',
         },
         query: {
@@ -431,15 +721,24 @@ export function createMcpProxyTool(ctx, manager) {
         },
         server: {
           type: 'string',
-          description: 'Configured MCP Server name. Used by describe and call.',
+          description:
+            'Configured MCP Server name. Used by describe, call, resources, read, prompts, and prompt.',
         },
         tool: {
           type: 'string',
           description: 'Raw tool name or <server>__<tool> search name. Used by describe and call.',
         },
+        uri: {
+          type: 'string',
+          description: 'Resource URI. Used by read.',
+        },
+        name: {
+          type: 'string',
+          description: 'Prompt name. Used by prompt.',
+        },
         args: {
           type: 'object',
-          description: 'Arguments sent to the MCP tool. Used by call.',
+          description: 'Arguments sent to the MCP tool or prompt. Used by call and prompt.',
           additionalProperties: true,
         },
       },
@@ -450,7 +749,10 @@ export function createMcpProxyTool(ctx, manager) {
       schema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['search', 'describe', 'call'] },
+          action: {
+            type: 'string',
+            enum: ['search', 'describe', 'call', 'resources', 'read', 'prompts', 'prompt'],
+          },
           text: { type: 'string' },
           data: {},
           guard: {},
@@ -490,7 +792,31 @@ export function createMcpProxyTool(ctx, manager) {
           exec,
         )
       }
-      throw new Error(`Unknown mcp action ${JSON.stringify(action)}. Use search, describe, or call.`)
+      if (action === 'resources') {
+        const serverName = requireText(args.server, 'server', action)
+        return resourcesAction(ctx, manager, serverName, exec)
+      }
+      if (action === 'read') {
+        const serverName = requireText(args.server, 'server', action)
+        const uri = requireText(args.uri, 'uri', action)
+        return readResourceAction(ctx, manager, serverName, uri, exec, resourceDeps)
+      }
+      if (action === 'prompts') {
+        const serverName = requireText(args.server, 'server', action)
+        return promptsAction(ctx, manager, serverName, exec)
+      }
+      if (action === 'prompt') {
+        const serverName = requireText(args.server, 'server', action)
+        const promptName = requireText(args.name, 'name', action)
+        if (args.args !== undefined && !isRecord(args.args)) {
+          throw new Error('mcp action "prompt" requires args to be an object when supplied')
+        }
+        return promptAction(ctx, manager, serverName, promptName, args.args ?? {}, exec)
+      }
+      throw new Error(
+        `Unknown mcp action ${JSON.stringify(action)}. ` +
+          'Use search, describe, call, resources, read, prompts, or prompt.',
+      )
     },
   }
 }

@@ -470,6 +470,65 @@ export class McpClientManager {
     })
   }
 
+  // Resources and prompts are never cached: every method below connects
+  // lazily and hits the live Server, so results always reflect the Server's
+  // current state. The tool metadata cache is untouched by these methods.
+
+  async listResources(name, { signal } = {}) {
+    return this.withConnection(name, signal, async (connection) => {
+      return cloneJson(
+        await connection.client.listResources(undefined, {
+          signal,
+          timeout: REQUEST_TIMEOUT_MS,
+        }),
+      )
+    })
+  }
+
+  async readResource(name, uri, { signal } = {}) {
+    return this.withConnection(name, signal, async (connection) => {
+      return cloneJson(
+        await connection.client.readResource({ uri }, {
+          signal,
+          timeout: REQUEST_TIMEOUT_MS,
+        }),
+      )
+    })
+  }
+
+  async listTemplates(name, { signal } = {}) {
+    return this.withConnection(name, signal, async (connection) => {
+      return cloneJson(
+        await connection.client.listResourceTemplates(undefined, {
+          signal,
+          timeout: REQUEST_TIMEOUT_MS,
+        }),
+      )
+    })
+  }
+
+  async listPrompts(name, { signal } = {}) {
+    return this.withConnection(name, signal, async (connection) => {
+      return cloneJson(
+        await connection.client.listPrompts(undefined, {
+          signal,
+          timeout: REQUEST_TIMEOUT_MS,
+        }),
+      )
+    })
+  }
+
+  async getPrompt(name, promptName, args = {}, { signal } = {}) {
+    return this.withConnection(name, signal, async (connection) => {
+      return cloneJson(
+        await connection.client.getPrompt(
+          { name: promptName, arguments: args },
+          { signal, timeout: REQUEST_TIMEOUT_MS },
+        ),
+      )
+    })
+  }
+
   async disconnect(name, reason = 'disconnected') {
     const record = this.records.get(name)
     if (record === undefined) return false
