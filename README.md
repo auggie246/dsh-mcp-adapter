@@ -39,7 +39,7 @@ Every page write carries the latest namespace revision. Field edits use path mut
 
 ## Server lifecycle
 
-The Host creates no unpromoted Server connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. A persisted Promotion can connect once to rebuild its native input schema. MCP `tools/list_changed` notifications refresh the cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
+The Host creates no unpromoted Server connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. Promotion discovery is the single documented exception to this startup laziness ([ADR 0003](./docs/adr/0003-promotion-discovery-lazy-exception.md)): when the Adapter starts up or re-enables a Server whose Config lists Promotions, the registry performs exactly one connect to rebuild the native input schema, then the connection follows the normal Lazy Lifecycle idle timeout. MCP `tools/list_changed` notifications refresh the cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
 
 Changing, disabling, or removing a Server closes its connection and clears its cache. Re-enabling a Server restores the lazy behavior. A Connection RPC channel, `/mcp-adapter`, exposes detached `status`, `catalog`, and combined `overview` snapshots. Its `reconnect` endpoint restarts one named Server. These endpoints never expose Config secrets or SDK objects.
 
