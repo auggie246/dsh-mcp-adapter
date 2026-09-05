@@ -2,6 +2,7 @@ import { installMcpManager, installMcpManagerRpc } from './manager.js'
 import { installMcpPromotions } from './promotions.js'
 import { installMcpProxyTool } from './proxy-tool.js'
 import { installMcpSettings } from './settings.js'
+import { installWorkspaceLayer } from './workspace-config.js'
 
 export const name = 'dsh-mcp-adapter'
 
@@ -11,14 +12,17 @@ export const inject = []
 
 export function apply(ctx) {
   installMcpSettings(ctx, (settingsCtx, scope) => {
+    const layeredScope = installWorkspaceLayer(settingsCtx, scope)
     settingsCtx.inject(['timer'], (managerCtx) => {
-      const manager = installMcpManager(managerCtx, scope)
+      const manager = installMcpManager(managerCtx, layeredScope)
       managerCtx.inject(['connection'], (rpcCtx) => {
-        installMcpManagerRpc(rpcCtx, manager)
+        installMcpManagerRpc(rpcCtx, manager, {
+          layerSnapshot: () => layeredScope.layerSnapshot(),
+        })
       })
       managerCtx.inject(['tools'], (toolCtx) => {
         installMcpProxyTool(toolCtx, manager)
-        installMcpPromotions(toolCtx, manager, scope)
+        installMcpPromotions(toolCtx, manager, layeredScope)
       })
     })
   })
@@ -30,3 +34,4 @@ export * from './output-guard.js'
 export * from './promotions.js'
 export * from './proxy-tool.js'
 export * from './settings.js'
+export * from './workspace-config.js'

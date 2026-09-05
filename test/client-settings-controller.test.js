@@ -8,6 +8,7 @@ import {
   parseMcpImport,
   secretKeysFromView,
   secretRowOps,
+  serverSource,
 } from '../src/client/settings-controller.js'
 
 test('normalizes standard imports and rejects invalid transport shapes', () => {
@@ -87,6 +88,95 @@ test('secret metadata exposes keys while path operations preserve blank existing
     ).map((op) => `${op.op}:${op.path.at(-1)}`),
     ['unset:A', 'unset:B', 'set:B', 'set:A'],
   )
+})
+
+test('serverSource reads the workspace layer snapshot with a global fallback', () => {
+  assert.equal(serverSource({ source: { fixture: 'workspace' } }, 'fixture'), 'workspace')
+  assert.equal(serverSource({ source: { fixture: 'global' } }, 'fixture'), 'global')
+  assert.equal(serverSource({ source: {} }, 'fixture'), 'global')
+  assert.equal(serverSource(undefined, 'fixture'), 'global')
+})
+
+test('controller loads the workspace layer snapshot through the Connection RPC', async () => {
+  const endpoints = []
+  const listeners = new Set()
+  let scopeSnapshot = {
+    status: 'ready',
+    value: { mcpServers: { fixture: { command: 'node', args: [] } } },
+    base: undefined,
+    user: {},
+    revision: 3,
+    writable: true,
+    mode: 'host',
+  }
+  let describeSnapshot = {
+    status: 'ready',
+    view: { writable: true, hasDocument: true, namespaces: [] },
+    error: null,
+  }
+  const scope = {
+    getSnapshot: () => scopeSnapshot,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+  const describe = {
+    getSnapshot: () => describeSnapshot,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    async ensure() {},
+    acceptView() {},
+  }
+  const settingsApi = {
+    async mutate(payload) {
+      return {
+        result: {
+          ok: true,
+          value: {
+            ns: 'mcp',
+            schema: {},
+            value: {},
+            applies: 'live',
+            secrets: [],
+            revision: payload.expectedRevision + 1,
+          },
+        },
+      }
+    },
+  }
+  const controller = new McpSettingsController({
+    scope,
+    describe,
+    settingsApi,
+    rpc: async (endpoint) => {
+      endpoints.push(endpoint)
+      if (endpoint === 'layers') {
+        return { ok: true, value: { source: { fixture: 'workspace' }, error: undefined } }
+      }
+      return { ok: true, value: { status: { servers: [] }, catalog: { servers: [] } } }
+    },
+  })
+
+  const unmount = controller.mount()
+  await controller.loadLayers()
+  assert.ok(endpoints.includes('layers'))
+  assert.deepEqual(controller.getSnapshot().layers, {
+    source: { fixture: 'workspace' },
+    error: undefined,
+  })
+
+  await controller.deleteServer('fixture')
+  assert.ok(endpoints.filter((endpoint) => endpoint === 'layers').length >= 2)
+  assert.deepEqual(controller.getSnapshot().layers, {
+    source: { fixture: 'workspace' },
+    error: undefined,
+  })
+
+  unmount()
+  await controller.dispose()
 })
 
 test('controller writes through the current namespace revision and folds the answer', async () => {

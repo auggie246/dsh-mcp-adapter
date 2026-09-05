@@ -19,7 +19,9 @@ test('npm package contains both Adapter faces and only publishable support files
     )
 
     assert.equal(result.status, 0, result.stderr)
-    const [pack] = JSON.parse(result.stdout)
+    const parsed = JSON.parse(result.stdout)
+    // npm >= 11 returns one object keyed by package name; older npm returns an array.
+    const pack = Array.isArray(parsed) ? parsed[0] : parsed['@auggieteo/dsh-mcp-adapter']
     assert.equal(pack.name, '@auggieteo/dsh-mcp-adapter')
 
     const files = pack.files.map(({ path }) => path)
