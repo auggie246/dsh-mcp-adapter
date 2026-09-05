@@ -308,6 +308,42 @@ test('Connection RPC exposes detached status and catalog snapshots', async () =>
   assert.equal((await registration.handler('missing')).ok, false)
 })
 
+test('reconnect failures settle as platform-legal internal error envelopes', async () => {
+  let registration
+  const manager = {
+    statusSnapshot: () => ({ servers: [] }),
+    catalogSnapshot: () => ({ servers: [] }),
+    async disconnect() {},
+    async listTools() {
+      throw new Error('Could not connect to demo with streamable HTTP or SSE.')
+    },
+  }
+  const ctx = {
+    connection: {
+      rpc: {
+        handle(channel, handler, options) {
+          registration = { channel, handler, options }
+        },
+      },
+    },
+  }
+  installMcpManagerRpc(ctx, manager)
+
+  const result = await registration.handler(
+    'reconnect',
+    { server: 'demo' },
+    new AbortController().signal,
+  )
+  assert.deepEqual(result, {
+    ok: false,
+    error: {
+      code: 'internal',
+      message: 'Could not connect to demo with streamable HTTP or SSE.',
+      details: {},
+    },
+  })
+})
+
 test('resource and prompt methods connect lazily and return detached JSON', async () => {
   const resources = {
     resources: [

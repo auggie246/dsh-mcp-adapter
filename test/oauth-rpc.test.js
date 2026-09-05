@@ -82,7 +82,8 @@ test('rpc channel and option wiring stay unchanged without oauth', async () => {
   assert.equal((await handler('status')).ok, true)
   const missingOauth = await handler('oauth-status', { server: 'remote' })
   assert.equal(missingOauth.ok, false)
-  assert.equal(missingOauth.error.code, 'mcp-oauth-failed')
+  assert.equal(missingOauth.error.code, 'internal')
+  assert.deepEqual(missingOauth.error.details, {})
 })
 
 test('oauth endpoints reject bad payloads with the bad-request shape', async () => {
@@ -148,7 +149,7 @@ test('oauth-logout deletes tokens and disconnects with the oauth logout reason',
   assert.deepEqual(manager.disconnects, [['remote', 'oauth logout']])
 })
 
-test('oauth failures surface as mcp-oauth-failed with the existing error shape', async () => {
+test('oauth failures settle as platform-legal internal error envelopes', async () => {
   const { oauth } = controllerHarness({
     servers: {
       remote: { url: 'https://a.test/api', auth: 'oauth', disabled: false },
@@ -160,14 +161,15 @@ test('oauth failures surface as mcp-oauth-failed with the existing error shape',
 
   const unknownServer = await handler('oauth-login', { server: 'ghost' })
   assert.equal(unknownServer.ok, false)
-  assert.equal(unknownServer.error.code, 'mcp-oauth-failed')
+  assert.equal(unknownServer.error.code, 'internal')
   assert.match(unknownServer.error.message, /Unknown MCP server "ghost"/)
-  assert.deepEqual(unknownServer.error.details, { issues: [] })
+  assert.deepEqual(unknownServer.error.details, {})
 
   const notOauth = await handler('oauth-login', { server: 'local' })
   assert.equal(notOauth.ok, false)
-  assert.equal(notOauth.error.code, 'mcp-oauth-failed')
+  assert.equal(notOauth.error.code, 'internal')
   assert.match(notOauth.error.message, /does not use OAuth authentication/)
+  assert.deepEqual(notOauth.error.details, {})
 
   // status stays lenient for Servers that are not configured for OAuth.
   const unconfigured = await handler('oauth-status', { server: 'local' })
@@ -213,8 +215,9 @@ test('oauth-logout refuses a Server that does not use OAuth and deletes nothing'
 
   const result = await handler('oauth-logout', { server: 'remote' })
   assert.equal(result.ok, false)
-  assert.equal(result.error.code, 'mcp-oauth-failed')
+  assert.equal(result.error.code, 'internal')
   assert.match(result.error.message, /does not use OAuth authentication/)
+  assert.deepEqual(result.error.details, {})
   assert.deepEqual(await store.get('remote'), { url: 'https://a.test/api', accessToken: 'at-1' })
   assert.deepEqual(manager.disconnects, [])
 })

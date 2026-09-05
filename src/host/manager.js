@@ -572,6 +572,11 @@ export const MCP_RPC_CHANNEL = '/mcp-adapter'
 export function installMcpManagerRpc(ctx, manager, options = {}) {
   const layerSnapshot = options.layerSnapshot
   const oauth = options.oauth
+  // Every response envelope must satisfy the platform's client-side RpcError
+  // schema: `bad-request` carries `details: { issues: [] }`, every other
+  // failure uses `internal` with empty `details`. A custom code passes the
+  // host, but the Client rejects the whole result with a schema error and the
+  // real message never reaches the UI.
   ctx.connection.rpc.handle(
     MCP_RPC_CHANNEL,
     async (endpoint, payload, signal) => {
@@ -626,9 +631,9 @@ export function installMcpManagerRpc(ctx, manager, options = {}) {
           return {
             ok: false,
             error: {
-              code: 'mcp-oauth-failed',
+              code: 'internal',
               message: 'OAuth support is not available on this Adapter',
-              details: { issues: [] },
+              details: {},
             },
           }
         }
@@ -645,9 +650,9 @@ export function installMcpManagerRpc(ctx, manager, options = {}) {
           return {
             ok: false,
             error: {
-              code: 'mcp-oauth-failed',
+              code: 'internal',
               message: errorMessage(error),
-              details: { issues: [] },
+              details: {},
             },
           }
         }
@@ -684,9 +689,9 @@ export function installMcpManagerRpc(ctx, manager, options = {}) {
           return {
             ok: false,
             error: {
-              code: 'mcp-reconnect-failed',
+              code: 'internal',
               message: errorMessage(error),
-              details: { issues: [] },
+              details: {},
             },
           }
         }
