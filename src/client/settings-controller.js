@@ -197,6 +197,15 @@ function overviewEmpty() {
   return { status: { servers: [] }, catalog: { servers: [] } }
 }
 
+/**
+ * Resolve the Config source of one Server from the workspace layer snapshot
+ * delivered by the `layers` Connection RPC endpoint. Without a snapshot —
+ * for example an older Host — every Server reads as global.
+ */
+export function serverSource(layers, name) {
+  return layers?.source?.[name] === 'workspace' ? 'workspace' : 'global'
+}
+
 export class McpSettingsController {
   constructor({ scope, describe, settingsApi, rpc, pollIntervalMs = 3_000 }) {
     this.scope = scope
@@ -208,15 +217,20 @@ export class McpSettingsController {
     this.overview = overviewEmpty()
     this.actionError = undefined
     this.overviewError = undefined
+    this.layers = undefined
     this.pendingWrites = 0
     this.mounted = 0
     this.stopPoll = undefined
     this.loadingOverview = undefined
+    this.loadingLayers = undefined
     this.tail = Promise.resolve()
     this.disposed = false
     this.unsubscribeScope = scope.subscribe(() => {
       this.publish()
-      if (this.mounted > 0) void this.loadOverview()
+      if (this.mounted > 0) {
+        void this.loadOverview()
+        void this.loadLayers()
+      }
     })
     this.unsubscribeDescribe = describe.subscribe(() => this.publish())
     this.snapshot = this.projection()
@@ -233,6 +247,7 @@ export class McpSettingsController {
       settings: this.scope.getSnapshot(),
       settingsDocument: this.describe.getSnapshot(),
       overview: this.overview,
+      layers: this.layers,
       error: this.actionError ?? this.overviewError,
       busy: this.pendingWrites > 0,
     }
@@ -252,7 +267,11 @@ export class McpSettingsController {
         this.publish()
       })
       void this.loadOverview()
-      const id = setInterval(() => void this.loadOverview(), this.pollIntervalMs)
+      void this.loadLayers()
+      const id = setInterval(() => {
+        void this.loadOverview()
+        void this.loadLayers()
+      }, this.pollIntervalMs)
       this.stopPoll = () => clearInterval(id)
     }
     return () => {
@@ -284,6 +303,26 @@ export class McpSettingsController {
     return request
   }
 
+  async loadLayers() {
+    if (this.disposed) return
+    if (this.loadingLayers !== undefined) return this.loadingLayers
+    const request = (async () => {
+      try {
+        const result = await this.rpc('layers', {})
+        if (!result.ok) throw new Error(result.error.message)
+        this.layers = result.value
+      } catch {
+        // The layer snapshot is auxiliary; without it every Server reads as global.
+        this.layers = undefined
+      } finally {
+        this.loadingLayers = undefined
+        this.publish()
+      }
+    })()
+    this.loadingLayers = request
+    return request
+  }
+
   enqueue(label, operation) {
     this.pendingWrites += 1
     this.actionError = undefined
@@ -291,7 +330,7 @@ export class McpSettingsController {
     const run = this.tail.then(async () => {
       try {
         await operation()
-        await this.loadOverview()
+        await Promise.all([this.loadOverview(), this.loadLayers()])
         return true
       } catch (error) {
         this.actionError = `${label}: ${messageOf(error)}`

@@ -567,7 +567,8 @@ export class McpClientManager {
 
 export const MCP_RPC_CHANNEL = '/mcp-adapter'
 
-export function installMcpManagerRpc(ctx, manager) {
+export function installMcpManagerRpc(ctx, manager, options = {}) {
+  const layerSnapshot = options.layerSnapshot
   ctx.connection.rpc.handle(
     MCP_RPC_CHANNEL,
     async (endpoint, payload, signal) => {
@@ -585,6 +586,19 @@ export function installMcpManagerRpc(ctx, manager) {
             catalog: manager.catalogSnapshot(),
           },
         }
+      }
+      if (endpoint === 'layers') {
+        if (typeof layerSnapshot !== 'function') {
+          return {
+            ok: false,
+            error: {
+              code: 'bad-request',
+              message: 'The MCP workspace layer snapshot is unavailable.',
+              details: { issues: [] },
+            },
+          }
+        }
+        return { ok: true, value: layerSnapshot() }
       }
       if (endpoint === 'reconnect') {
         if (

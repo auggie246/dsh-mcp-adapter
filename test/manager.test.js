@@ -395,6 +395,39 @@ test('resource and prompt methods connect lazily and return detached JSON', asyn
   await manager.dispose()
 })
 
+test('Connection RPC exposes the workspace layer snapshot only when provided', async () => {
+  const manager = {
+    statusSnapshot: () => ({ servers: [] }),
+    catalogSnapshot: () => ({ servers: [] }),
+    async disconnect() {},
+    async listTools() {},
+  }
+  const handlers = []
+  const ctx = {
+    connection: {
+      rpc: {
+        handle(channel, handler, options) {
+          handlers.push(handler)
+        },
+      },
+    },
+  }
+
+  installMcpManagerRpc(ctx, manager, {
+    layerSnapshot: () => ({ source: { demo: 'workspace' }, error: undefined }),
+  })
+  installMcpManagerRpc(ctx, manager)
+  assert.equal(handlers.length, 2)
+
+  assert.deepEqual(await handlers[0]('layers'), {
+    ok: true,
+    value: { source: { demo: 'workspace' }, error: undefined },
+  })
+  const withoutLayer = await handlers[1]('layers')
+  assert.equal(withoutLayer.ok, false)
+  assert.equal(withoutLayer.error.code, 'bad-request')
+})
+
 test('callTool delegates arguments and returns detached JSON', async () => {
   const scope = new MemoryScope({ mcpServers: { demo: serverConfig() } })
   const scheduler = new ManualScheduler()

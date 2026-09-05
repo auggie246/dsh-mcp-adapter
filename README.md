@@ -29,9 +29,17 @@ Each Server configures exactly one Transport: `command` for stdio, or `url` for 
 
 The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. Each `env` and `headers` value has the DSH `secret` schema role. Wire views retain each key and redact its value.
 
+### Workspace Config layer
+
+The Host also reads `.dsh/mcp.json` under its workspace root and merges it over the global namespace at resolve time. A workspace Server entry with the same name replaces the global entry wholesale; workspace-only names are added; global-only names pass through. Disable or override a Server from the workspace by defining it there with `disabled: true`.
+
+The workspace file uses the same `mcpServers` shape and validation as the global Config. Unknown top-level keys (only `mcpServers` is allowed) or an invalid Server entry reject the whole layer, which fails closed to the global-only Config with a Host warning; a missing file is an empty layer. Values are never environment-variable-interpolated. The Adapter never writes the workspace file: page edits, imports, and API writes all stay on the global namespace, which the workspace file overrides. See [ADR-0005](./docs/adr/0005-per-workspace-config.md).
+
 ## Settings page
 
 Open **Settings > MCP** to add, import, edit, reconnect, disable, or delete a Server. The Server list shows live connection state and cached tool counts. The detail panel manages Transport fields, secret values, Auto-allow, the idle timeout, and Promotions.
+
+Servers whose Config comes from the workspace `.dsh/mcp.json` show a `workspace` badge in the Server list. Their detail panel explains that the workspace file defines or overrides the Server and disables the save control: edits there write the global layer, which the workspace file overrides.
 
 JSON import accepts the standard `{ "mcpServers": { ... } }` shape. Import replaces matching Server entries and preserves Servers absent from the import.
 

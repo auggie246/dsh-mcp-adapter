@@ -21,7 +21,7 @@ export const MCP_SETTINGS_CSS = `
 .mcp-layout{display:grid;grid-template-columns:208px minmax(0,1fr);gap:14px;align-items:start;min-width:0}
 .mcp-card,.mcp-empty{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-2)}
 .mcp-sidebar{display:flex;flex-direction:column;gap:2px;position:sticky;top:12px}
-.mcp-server-button{width:100%;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:8px 10px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;text-align:left;cursor:pointer;font:inherit;transition:background .12s ease,color .12s ease}
+.mcp-server-button{width:100%;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:8px 10px;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px;align-items:center;text-align:left;cursor:pointer;font:inherit;transition:background .12s ease,color .12s ease}
 .mcp-server-button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .mcp-server-button[aria-current=true]{background:var(--dsw-alias-button-ghost-active-fill);color:var(--dsw-alias-label-primary)}
 .mcp-server-name{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:500}
@@ -43,6 +43,8 @@ export const MCP_SETTINGS_CSS = `
 .mcp-badge.mcp-status-connecting{color:var(--dsw-alias-state-warn-label);border-color:color-mix(in srgb, var(--dsw-alias-state-warn-primary) 35%, transparent);background:transparent}
 .mcp-badge.mcp-status-error{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb, var(--dsw-alias-state-error-primary) 35%, transparent);background:transparent}
 .mcp-badge.mcp-status-disabled{color:var(--dsw-alias-label-dimmed);background:transparent}
+.mcp-badge-workspace{color:var(--dsw-alias-state-business-primary);border-color:color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);background:transparent}
+.mcp-layer-notice{border:1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);border-radius:8px;padding:9px 11px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
 .mcp-form{display:flex;flex-direction:column;gap:12px}
 .mcp-field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .mcp-field-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}

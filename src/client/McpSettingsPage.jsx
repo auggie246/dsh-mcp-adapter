@@ -6,6 +6,7 @@ import {
   parseMcpImport,
   secretKeysFromView,
   secretRowOps,
+  serverSource,
 } from './settings-controller.js'
 
 function statusFor(overview, name) {
@@ -267,6 +268,7 @@ function ImportDialog({ controller, busy, onClose }) {
 function ServerDetail({ controller, snapshot, name, server }) {
   const status = statusFor(snapshot.overview, name)
   const tools = catalogFor(snapshot.overview, name)
+  const workspaceSourced = serverSource(snapshot.layers, name) === 'workspace'
   const transport = typeof server.command === 'string' ? 'stdio' : 'http'
   const [draft, setDraft] = useState(() => ({
     transport,
@@ -362,6 +364,9 @@ function ServerDetail({ controller, snapshot, name, server }) {
             <span className={`mcp-status-dot ${statusClass(status.state)}`} />
             <h2 className="mcp-card-title">{name}</h2>
             <span className={`mcp-badge ${statusClass(status.state)}`}>{status.state}</span>
+            {workspaceSourced && (
+              <span className="mcp-badge mcp-badge-workspace">workspace</span>
+            )}
           </div>
           <p className="mcp-muted">
             {status.toolCount} {status.toolCount === 1 ? 'tool' : 'tools'} cached
@@ -388,6 +393,12 @@ function ServerDetail({ controller, snapshot, name, server }) {
         </div>
       </div>
 
+      {workspaceSourced && (
+        <div className="mcp-layer-notice" role="note">
+          This Server is defined or overridden by the workspace .dsh/mcp.json.
+          Edits here write the global layer, which the workspace file overrides.
+        </div>
+      )}
       {status.message !== undefined && status.state === 'error' && (
         <div className="mcp-error" role="alert">{status.message}</div>
       )}
@@ -509,11 +520,12 @@ function ServerDetail({ controller, snapshot, name, server }) {
           <button
             type="submit"
             className="mcp-button mcp-button-primary"
-            disabled={snapshot.busy || !dirty}
+            disabled={workspaceSourced || snapshot.busy || !dirty}
           >
             {snapshot.busy ? 'Saving…' : 'Save Server'}
           </button>
-          {dirty && <span className="mcp-muted">Unsaved changes</span>}
+          {dirty && !workspaceSourced && <span className="mcp-muted">Unsaved changes</span>}
+          {workspaceSourced && <span className="mcp-muted">Read-only: defined by the workspace</span>}
         </div>
       </form>
 
@@ -647,6 +659,7 @@ export function McpSettingsPage({ controller }) {
           <nav className="mcp-sidebar" aria-label="MCP Servers">
             {names.map((name) => {
               const status = statusFor(snapshot.overview, name)
+              const workspaceSourced = serverSource(snapshot.layers, name) === 'workspace'
               return (
                 <button
                   type="button"
@@ -657,6 +670,9 @@ export function McpSettingsPage({ controller }) {
                 >
                   <span className={`mcp-status-dot ${statusClass(status.state)}`} />
                   <span className="mcp-server-name">{name}</span>
+                  {workspaceSourced && (
+                    <span className="mcp-badge mcp-badge-workspace">workspace</span>
+                  )}
                   <span className="mcp-server-count">{status.toolCount}</span>
                 </button>
               )
