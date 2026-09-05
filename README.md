@@ -1,6 +1,6 @@
 # dsh-mcp-adapter
 
-A [Deepseek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that connects the DSH agent to MCP servers. It mirrors the major features of [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter): one token-efficient `mcp` proxy tool over every configured server, optional per-tool promotion to native DSH tools, and lazy server lifecycles. Servers are added and configured in the DSH web UI under **Settings > MCP**; configuration persists in the DSH settings document (`$DSH_HOME/settings.yaml`, namespace `mcp`).
+A [Deepseek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that connects the DSH agent to MCP servers. It mirrors the major features of [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter): one token-efficient `mcp` proxy tool over every configured server, optional per-tool promotion to native DSH tools, and configurable Server lifecycles (`lazy` by default). Servers are added and configured in the DSH web UI under **Settings > MCP**; configuration persists in the DSH settings document (`$DSH_HOME/settings.yaml`, namespace `mcp`).
 
 Vocabulary lives in [CONTEXT.md](./CONTEXT.md). Design decisions live in [docs/adr/](./docs/adr/). Work is tracked as [GitHub issues](https://github.com/auggie246/dsh-mcp-adapter/issues).
 
@@ -25,7 +25,7 @@ mcp:
         Authorization: Bearer example-token
 ```
 
-Each Server configures exactly one Transport: `command` for stdio, or `url` for streamable HTTP with SSE fallback. Adapter extension fields are `disabled`, `autoAllow`, `lifecycle` (`lazy` only in v1), `idleTimeoutMinutes` (default `10`), and `promotedTools`.
+Each Server configures exactly one Transport: `command` for stdio, or `url` for streamable HTTP with SSE fallback. Adapter extension fields are `disabled`, `autoAllow`, `lifecycle` (`lazy`, `eager`, `keep-alive`, or `lazy-keep-alive`; default `lazy`), `idleTimeoutMinutes` (default `10`), and `promotedTools`.
 
 The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. Each `env` and `headers` value has the DSH `secret` schema role. Wire views retain each key and redact its value.
 
@@ -39,9 +39,16 @@ Every page write carries the latest namespace revision. Field edits use path mut
 
 ## Server lifecycle
 
-The Host creates no unpromoted Server connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. A persisted Promotion can connect once to rebuild its native input schema. MCP `tools/list_changed` notifications refresh the cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
+Each Server's `lifecycle` setting controls when it connects and whether it idles out. `lazy` remains the default.
 
-Changing, disabling, or removing a Server closes its connection and clears its cache. Re-enabling a Server restores the lazy behavior. A Connection RPC channel, `/mcp-adapter`, exposes detached `status`, `catalog`, and combined `overview` snapshots. Its `reconnect` endpoint restarts one named Server. These endpoints never expose Config secrets or SDK objects.
+- `lazy` (default): connects on the first tool-list or tool-call request and disconnects after the idle timeout; the next request reconnects it.
+- `eager`: connects when the Adapter starts, when the Server is added or re-enabled, or when its connection Config changes, and still disconnects after the idle timeout.
+- `keep-alive`: connects like `eager` but never idles out. When the connection closes unexpectedly, it reconnects after 30 seconds and keeps retrying every 30 seconds until it succeeds.
+- `lazy-keep-alive`: connects on first use like `lazy`, but never idles out and auto-reconnects like `keep-alive`.
+
+A `lazy` or `lazy-keep-alive` Server creates no connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. A persisted Promotion can connect once to rebuild its native input schema. MCP `tools/list_changed` notifications refresh the cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
+
+Changing, disabling, or removing a Server closes its connection, clears its cache, and cancels any pending keep-alive reconnect; a disabled Server never reconnects. Re-enabling a Server restores its configured lifecycle, so `eager` and `keep-alive` Servers connect again. A Connection RPC channel, `/mcp-adapter`, exposes detached `status`, `catalog`, and combined `overview` snapshots. Its `reconnect` endpoint restarts one named Server. These endpoints never expose Config secrets or SDK objects.
 
 ## Proxy Tool
 
