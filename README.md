@@ -50,6 +50,19 @@ A `lazy` or `lazy-keep-alive` Server creates no connection at startup. The first
 
 Changing, disabling, or removing a Server closes its connection, clears its cache, and cancels any pending keep-alive reconnect; a disabled Server never reconnects. Re-enabling a Server restores its configured lifecycle, so `eager` and `keep-alive` Servers connect again. A Connection RPC channel, `/mcp-adapter`, exposes detached `status`, `catalog`, and combined `overview` snapshots. Its `reconnect` endpoint restarts one named Server. These endpoints never expose Config secrets or SDK objects.
 
+## Commands
+
+The Host registers one human command, `/mcp`, with four subcommands. A bare `/mcp` or `/mcp status` prints one line per Server: name, live state, cached tool count, and the last message when one is present.
+
+```text
+/mcp                        # status of every Server
+/mcp reconnect filesystem   # close and relist one Server now
+/mcp disable hosted         # keep the Config, stop the Server
+/mcp enable hosted          # restore the lazy lifecycle
+```
+
+`reconnect` mirrors the `/mcp-adapter` RPC endpoint: it closes the Server's current connection and lists tools so it reconnects. `enable` and `disable` write the global Config's `disabled` flag — the same write as **Settings > MCP** — and leave the Server entry otherwise untouched. An unknown Server, unknown subcommand, or missing argument answers with `Usage: /mcp [status|reconnect|enable|disable] [server]`.
+
 ## Proxy Tool
 
 The Host registers one global `mcp` tool with three actions:
