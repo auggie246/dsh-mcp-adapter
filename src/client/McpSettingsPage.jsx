@@ -4,6 +4,7 @@ import {
   normalizeServerConfig,
   parseArgs,
   parseMcpImport,
+  parseScopes,
   secretKeysFromView,
   secretRowOps,
   serverSource,
@@ -275,6 +276,8 @@ function ServerDetail({ controller, snapshot, name, server }) {
     command: server.command ?? '',
     url: server.url ?? '',
     argsText: JSON.stringify(server.args ?? [], null, 2),
+    auth: server.auth ?? 'headers',
+    scopesText: (server.scopes ?? []).join(', '),
     disabled: server.disabled === true,
     autoAllow: server.autoAllow === true,
     idleTimeoutMinutes: String(server.idleTimeoutMinutes ?? 10),
@@ -297,6 +300,8 @@ function ServerDetail({ controller, snapshot, name, server }) {
       command: server.command ?? '',
       url: server.url ?? '',
       argsText: JSON.stringify(server.args ?? [], null, 2),
+      auth: server.auth ?? 'headers',
+      scopesText: (server.scopes ?? []).join(', '),
       disabled: server.disabled === true,
       autoAllow: server.autoAllow === true,
       idleTimeoutMinutes: String(server.idleTimeoutMinutes ?? 10),
@@ -324,6 +329,8 @@ function ServerDetail({ controller, snapshot, name, server }) {
         ...(nextTransport === 'stdio'
           ? { command: draft.command, args: parseArgs(draft.argsText) }
           : { url: draft.url }),
+        auth: nextTransport === 'http' ? draft.auth : 'headers',
+        scopes: nextTransport === 'http' ? parseScopes(draft.scopesText) : [],
         disabled: draft.disabled,
         autoAllow: draft.autoAllow,
         idleTimeoutMinutes: Number(draft.idleTimeoutMinutes),
@@ -354,6 +361,23 @@ function ServerDetail({ controller, snapshot, name, server }) {
   }
   const remove = async () => {
     if (await controller.deleteServer(name)) setConfirmDelete(false)
+  }
+
+  const oauthStatus = snapshot.oauthStatuses?.[name]
+  const oauthSignedIn =
+    oauthStatus !== undefined &&
+    oauthStatus.signedIn === true &&
+    (oauthStatus.expiresAt === undefined || oauthStatus.expiresAt > Date.now())
+  const oauthState = oauthStatus?.configured
+    ? oauthSignedIn
+      ? 'Signed in'
+      : oauthStatus.expiresAt !== undefined
+        ? 'Signed out (token expired)'
+        : 'Signed out'
+    : 'Signed out'
+  const signIn = async () => {
+    const result = await controller.signIn(name)
+    if (result?.authorizationUrl) window.open(result.authorizationUrl, '_blank')
   }
 
   return (
@@ -477,6 +501,32 @@ function ServerDetail({ controller, snapshot, name, server }) {
                 onChange={(event) => changeDraft({ url: event.target.value })}
               />
             </label>
+            <div className="mcp-field-row">
+              <label className="mcp-field">
+                <span className="mcp-label">HTTP authentication</span>
+                <select
+                  className="mcp-select"
+                  value={draft.auth ?? 'headers'}
+                  disabled={snapshot.busy}
+                  onChange={(event) => changeDraft({ auth: event.target.value })}
+                >
+                  <option value="headers">Static headers</option>
+                  <option value="oauth">OAuth 2.0 with PKCE</option>
+                </select>
+              </label>
+              {draft.auth === 'oauth' && (
+                <label className="mcp-field">
+                  <span className="mcp-label">OAuth scopes (comma-separated)</span>
+                  <input
+                    className="mcp-input"
+                    value={draft.scopesText}
+                    disabled={snapshot.busy}
+                    placeholder="read write"
+                    onChange={(event) => changeDraft({ scopesText: event.target.value })}
+                  />
+                </label>
+              )}
+            </div>
             <SecretEditor field="headers" rows={rows} onChange={changeRows} disabled={snapshot.busy} />
           </>
         )}
@@ -528,6 +578,37 @@ function ServerDetail({ controller, snapshot, name, server }) {
           {workspaceSourced && <span className="mcp-muted">Read-only: defined by the workspace</span>}
         </div>
       </form>
+
+      {typeof server.url === 'string' && server.auth === 'oauth' && (
+        <div className="mcp-section">
+          <div>
+            <h3 className="mcp-section-title">OAuth</h3>
+            <p className="mcp-muted">
+              OAuth 2.0 with PKCE. {oauthState}. Sign-in opens the authorization
+              page in your browser; the Adapter completes the flow in the
+              background and reconnects with the fresh tokens.
+            </p>
+          </div>
+          <div className="mcp-actions">
+            <button
+              type="button"
+              className="mcp-button mcp-button-primary"
+              disabled={snapshot.busy}
+              onClick={() => void signIn()}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              className="mcp-button"
+              disabled={snapshot.busy}
+              onClick={() => void controller.signOut(name)}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mcp-section">
         <div>

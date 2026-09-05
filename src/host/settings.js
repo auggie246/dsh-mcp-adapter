@@ -22,6 +22,14 @@ export const McpServerSchema = z
     headers: z
       .dict(z.string().role('secret'))
       .description('Headers sent to the remote HTTP MCP server.'),
+    auth: z
+      .union(['headers', 'oauth'])
+      .default('headers')
+      .description('HTTP authentication mode: static headers, or OAuth 2.0 with PKCE.'),
+    scopes: z
+      .array(z.string())
+      .default([])
+      .description('OAuth scopes to request.'),
 
     // Adapter extensions. These fields remain paste-compatible with standard
     // clients because other clients ignore unknown per-server keys.
@@ -67,6 +75,8 @@ const SERVER_KEYS = new Set([
   'env',
   'url',
   'headers',
+  'auth',
+  'scopes',
   'disabled',
   'autoAllow',
   'lifecycle',
@@ -130,6 +140,13 @@ export function validateMcpSettings(value) {
       if (Object.keys(server.env).length > 0) {
         fail(`${path}.env`, 'only stdio servers may configure env')
       }
+    }
+
+    if (server.auth === 'oauth' && !hasUrl) {
+      fail(`${path}.auth`, 'OAuth requires the HTTP Transport (url)')
+    }
+    if (server.scopes.length > 0 && server.auth !== 'oauth') {
+      fail(`${path}.scopes`, 'scopes require auth "oauth"')
     }
 
     if (

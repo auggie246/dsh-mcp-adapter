@@ -6,6 +6,7 @@ import {
   normalizeServerConfig,
   parseArgs,
   parseMcpImport,
+  parseScopes,
   secretKeysFromView,
   secretRowOps,
   serverSource,
@@ -24,6 +25,8 @@ test('normalizes standard imports and rejects invalid transport shapes', () => {
         command: 'node',
         args: ['server.mjs'],
         env: { TOKEN: 'secret' },
+        auth: 'headers',
+        scopes: [],
         disabled: false,
         autoAllow: false,
         lifecycle: 'lazy',
@@ -33,6 +36,8 @@ test('normalizes standard imports and rejects invalid transport shapes', () => {
       remote: {
         url: 'https://example.test/mcp',
         headers: { Authorization: 'Bearer x' },
+        auth: 'headers',
+        scopes: [],
         disabled: false,
         autoAllow: false,
         lifecycle: 'lazy',
@@ -47,6 +52,116 @@ test('normalizes standard imports and rejects invalid transport shapes', () => {
     () => normalizeServerConfig('bad', { command: 'node', url: 'https://example.test' }),
     /exactly one/,
   )
+})
+
+test('normalizes auth modes and OAuth scopes for HTTP Servers', () => {
+  assert.deepEqual(
+    normalizeServerConfig('remote', {
+      url: 'https://a.test/api',
+      auth: 'oauth',
+      scopes: ['read', 'write'],
+    }),
+    {
+      url: 'https://a.test/api',
+      headers: {},
+      auth: 'oauth',
+      scopes: ['read', 'write'],
+      disabled: false,
+      autoAllow: false,
+      lifecycle: 'lazy',
+      idleTimeoutMinutes: 10,
+      promotedTools: [],
+    },
+  )
+  assert.throws(
+    () => normalizeServerConfig('local', { command: 'node', auth: 'oauth' }),
+    /OAuth requires the HTTP Transport/,
+  )
+  assert.throws(
+    () => normalizeServerConfig('remote', { url: 'https://a.test/api', scopes: ['read'] }),
+    /scopes require OAuth/,
+  )
+  assert.throws(
+    () => normalizeServerConfig('remote', { url: 'https://a.test/api', auth: 'basic' }),
+    /auth must be "headers" or "oauth"/,
+  )
+  assert.deepEqual(parseScopes(' read , write ,, '), ['read', 'write'])
+  assert.deepEqual(parseScopes(''), [])
+})
+
+test('oauth actions call the RPC endpoints and surface the authorization URL', async () => {
+  const rpcCalls = []
+  const listeners = new Set()
+  let scopeSnapshot = {
+    status: 'ready',
+    value: {
+      mcpServers: {
+        remote: { url: 'https://a.test/api', auth: 'oauth' },
+      },
+    },
+    revision: 3,
+    writable: true,
+  }
+  let describeSnapshot = {
+    status: 'ready',
+    view: { writable: true, hasDocument: true, namespaces: [] },
+    error: null,
+  }
+  const scope = {
+    getSnapshot: () => scopeSnapshot,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+  const describe = {
+    getSnapshot: () => describeSnapshot,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    async ensure() {},
+    acceptView() {},
+  }
+  const controller = new McpSettingsController({
+    scope,
+    describe,
+    settingsApi: {},
+    rpc: async (endpoint, payload) => {
+      rpcCalls.push([endpoint, payload])
+      if (endpoint === 'oauth-login') {
+        return { ok: true, value: { authorizationUrl: 'https://auth.example.test/authorize' } }
+      }
+      if (endpoint === 'oauth-status') {
+        return {
+          ok: true,
+          value: { configured: true, signedIn: true, expiresAt: 1_700_000_000_000, url: 'https://a.test/api' },
+        }
+      }
+      return { ok: true, value: { status: { servers: [] }, catalog: { servers: [] } } }
+    },
+  })
+
+  const signIn = await controller.signIn('remote')
+  assert.deepEqual(signIn, { authorizationUrl: 'https://auth.example.test/authorize' })
+
+  assert.equal(await controller.signOut('remote'), true)
+
+  await controller.loadOauthStatuses()
+  assert.deepEqual(controller.getSnapshot().oauthStatuses, {
+    remote: { configured: true, signedIn: true, expiresAt: 1_700_000_000_000, url: 'https://a.test/api' },
+  })
+
+  const endpoints = rpcCalls.map(([endpoint]) => endpoint)
+  assert.deepEqual(endpoints, [
+    'oauth-login',
+    'oauth-logout',
+    'overview',
+    'oauth-status',
+    'oauth-status',
+  ])
+  assert.deepEqual(rpcCalls[0][1], { server: 'remote' })
+  await controller.dispose()
 })
 
 test('secret metadata exposes keys while path operations preserve blank existing values', () => {

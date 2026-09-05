@@ -7,6 +7,8 @@ const SERVER_FIELDS = new Set([
   'env',
   'url',
   'headers',
+  'auth',
+  'scopes',
   'disabled',
   'autoAllow',
   'lifecycle',
@@ -81,6 +83,25 @@ export function normalizeServerConfig(name, input) {
   if (!Number.isFinite(idleTimeoutMinutes) || idleTimeoutMinutes <= 0) {
     throw new Error(`Server ${JSON.stringify(name)} idle timeout must be positive`)
   }
+
+  const auth = input.auth ?? 'headers'
+  if (auth !== 'headers' && auth !== 'oauth') {
+    throw new Error(`Server ${JSON.stringify(name)} auth must be "headers" or "oauth"`)
+  }
+  if (auth === 'oauth' && !hasUrl) {
+    throw new Error(`Server ${JSON.stringify(name)} OAuth requires the HTTP Transport (url)`)
+  }
+  const scopes = input.scopes ?? []
+  if (
+    !Array.isArray(scopes) ||
+    scopes.some((entry) => typeof entry !== 'string' || entry.trim() === '')
+  ) {
+    throw new Error(`Server ${JSON.stringify(name)} scopes must be an array of scope strings`)
+  }
+  if (scopes.length > 0 && auth !== 'oauth') {
+    throw new Error(`Server ${JSON.stringify(name)} scopes require OAuth authentication`)
+  }
+
   const promotedTools = input.promotedTools ?? []
   if (
     !Array.isArray(promotedTools) ||
@@ -95,12 +116,22 @@ export function normalizeServerConfig(name, input) {
       url: input.url.trim(),
       headers,
     }),
+    auth,
+    scopes,
     disabled: input.disabled === true,
     autoAllow: input.autoAllow === true,
     lifecycle: 'lazy',
     idleTimeoutMinutes,
     promotedTools,
   }
+}
+
+/** Parse comma-separated OAuth scope text into a clean string array. */
+export function parseScopes(text) {
+  return String(text ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
 }
 
 export function parseMcpImport(text) {
@@ -215,6 +246,7 @@ export class McpSettingsController {
     this.pollIntervalMs = pollIntervalMs
     this.listeners = new Set()
     this.overview = overviewEmpty()
+    this.oauthStatuses = {}
     this.actionError = undefined
     this.overviewError = undefined
     this.layers = undefined
@@ -248,6 +280,7 @@ export class McpSettingsController {
       settingsDocument: this.describe.getSnapshot(),
       overview: this.overview,
       layers: this.layers,
+      oauthStatuses: this.oauthStatuses,
       error: this.actionError ?? this.overviewError,
       busy: this.pendingWrites > 0,
     }
@@ -292,6 +325,7 @@ export class McpSettingsController {
         if (!result.ok) throw new Error(result.error.message)
         this.overview = result.value
         this.overviewError = undefined
+        await this.loadOauthStatuses()
       } catch (error) {
         this.overviewError = `Could not load MCP status: ${messageOf(error)}`
       } finally {
@@ -321,6 +355,28 @@ export class McpSettingsController {
     })()
     this.loadingLayers = request
     return request
+  }
+
+  /** Fetch `oauth-status` for every Server configured with OAuth. */
+  async loadOauthStatuses() {
+    if (this.disposed) return
+    const servers = this.scope.getSnapshot().value?.mcpServers ?? {}
+    const names = Object.entries(servers)
+      .filter(([, config]) => config?.auth === 'oauth' && typeof config.url === 'string')
+      .map(([name]) => name)
+    const statuses = {}
+    await Promise.all(
+      names.map(async (name) => {
+        try {
+          const result = await this.rpc('oauth-status', { server: name })
+          if (result.ok) statuses[name] = result.value
+        } catch {
+          // A failed status probe leaves the Server out of the snapshot.
+        }
+      }),
+    )
+    this.oauthStatuses = statuses
+    this.publish()
   }
 
   enqueue(label, operation) {
@@ -410,10 +466,13 @@ export class McpSettingsController {
       const existing = this.scope.getSnapshot().value?.mcpServers?.[name]
       if (existing === undefined) throw new Error(`Server ${JSON.stringify(name)} no longer exists`)
       const args = draft.transport === 'stdio' ? parseArgs(draft.argsText) : []
+      const scopes = draft.transport === 'http' ? parseScopes(draft.scopesText) : []
       const candidate = normalizeServerConfig(name, {
         ...(draft.transport === 'stdio'
           ? { command: draft.command, args, env: {} }
           : { url: draft.url, headers: {} }),
+        auth: draft.transport === 'http' ? (draft.auth ?? 'headers') : 'headers',
+        scopes,
         disabled: draft.disabled,
         autoAllow: draft.autoAllow,
         idleTimeoutMinutes: Number(draft.idleTimeoutMinutes),
@@ -427,6 +486,8 @@ export class McpSettingsController {
           path: ['mcpServers', name, 'idleTimeoutMinutes'],
           value: candidate.idleTimeoutMinutes,
         },
+        { op: 'set', path: ['mcpServers', name, 'auth'], value: candidate.auth },
+        { op: 'set', path: ['mcpServers', name, 'scopes'], value: candidate.scopes },
       ]
       if (draft.transport === 'stdio') {
         ops.push(
@@ -473,6 +534,34 @@ export class McpSettingsController {
         throw new Error(result.error.message)
       }
       this.overview = result.value
+    })
+  }
+
+  /**
+   * Start the OAuth flow for one Server. Resolves with the RPC value
+   * (`{ authorizationUrl }`); the caller opens the URL in the browser.
+   */
+  async signIn(name) {
+    this.pendingWrites += 1
+    this.actionError = undefined
+    this.publish()
+    try {
+      const result = await this.rpc('oauth-login', { server: name })
+      if (!result.ok) throw new Error(result.error.message)
+      return result.value
+    } catch (error) {
+      this.actionError = `Could not start sign-in: ${messageOf(error)}`
+      return undefined
+    } finally {
+      this.pendingWrites -= 1
+      this.publish()
+    }
+  }
+
+  signOut(name) {
+    return this.enqueue('Could not sign out', async () => {
+      const result = await this.rpc('oauth-logout', { server: name })
+      if (!result.ok) throw new Error(result.error.message)
     })
   }
 

@@ -6,6 +6,8 @@ import {
 } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
+import { createOAuthProvider } from './oauth.js'
+
 export const CONNECT_TIMEOUT_MS = 30_000
 export const REQUEST_TIMEOUT_MS = 30_000
 
@@ -61,12 +63,44 @@ async function connectClient(client, transport, signal) {
   })
 }
 
+function oauthSignInError(serverName) {
+  return new Error(
+    `OAuth authorization required for ${serverName} — sign in via Settings > MCP or /mcp-auth`,
+  )
+}
+
+/**
+ * Build the connection-time OAuth provider for one Server. The provider is
+ * non-interactive: without a redirectUrl the SDK can never start a browser
+ * flow from a background connect. Signed-in state is required up front; the
+ * URL binding from the store must match the configured Server URL.
+ */
+async function createHttpAuthProvider(serverName, config, oauth) {
+  const record = oauth?.store === undefined ? undefined : await oauth.store.get(serverName)
+  if (
+    record === undefined ||
+    record.url !== config.url ||
+    typeof record.accessToken !== 'string' ||
+    record.accessToken === ''
+  ) {
+    throw oauthSignInError(serverName)
+  }
+  return createOAuthProvider(serverName, config, {
+    store: oauth.store,
+    callbacks: { onAuthorizationRequired: oauth.onAuthorizationRequired },
+  })
+}
+
 /**
  * Create one connected SDK client. HTTP follows the MCP compatibility rule:
  * attempt streamable HTTP first, then retry once with the legacy SSE transport
  * and a fresh Client/Transport pair.
  *
  * `sdk` is injectable for transport-contract tests. Production callers omit it.
+ * `oauth` carries `{ store, onAuthorizationRequired }`; Servers configured with
+ * `auth: "oauth"` require signed-in tokens in the store before connecting, and
+ * both HTTP transports receive the provider as their `authProvider`. The
+ * header/bearer path (`auth: "headers"`) is unchanged.
  */
 export async function createMcpConnection(
   serverName,
@@ -74,6 +108,7 @@ export async function createMcpConnection(
   callbacks = {},
   signal,
   sdk = DEFAULT_SDK,
+  oauth,
 ) {
   if (typeof config.command === 'string') {
     const client = createClient(serverName, callbacks, sdk)
@@ -113,10 +148,13 @@ export async function createMcpConnection(
 
   const url = new URL(config.url)
   const requestInit = { headers: { ...config.headers } }
+  const authProvider =
+    config.auth === 'oauth' ? await createHttpAuthProvider(serverName, config, oauth) : undefined
 
   let streamableClient = createClient(serverName, callbacks, sdk)
   let streamableTransport = new sdk.StreamableHTTPClientTransport(url, {
     requestInit,
+    ...(authProvider === undefined ? {} : { authProvider }),
   })
   let streamableError
 
@@ -135,7 +173,10 @@ export async function createMcpConnection(
   }
 
   const sseClient = createClient(serverName, callbacks, sdk)
-  const sseTransport = new sdk.SSEClientTransport(url, { requestInit })
+  const sseTransport = new sdk.SSEClientTransport(url, {
+    requestInit,
+    ...(authProvider === undefined ? {} : { authProvider }),
+  })
   try {
     await connectClient(sseClient, sseTransport, signal)
     return {

@@ -80,6 +80,8 @@ function connectionConfig(config) {
     env: config.env,
     url: config.url,
     headers: config.headers,
+    auth: config.auth,
+    scopes: config.scopes,
     disabled: config.disabled,
     lifecycle: config.lifecycle,
   }
@@ -569,6 +571,7 @@ export const MCP_RPC_CHANNEL = '/mcp-adapter'
 
 export function installMcpManagerRpc(ctx, manager, options = {}) {
   const layerSnapshot = options.layerSnapshot
+  const oauth = options.oauth
   ctx.connection.rpc.handle(
     MCP_RPC_CHANNEL,
     async (endpoint, payload, signal) => {
@@ -599,6 +602,53 @@ export function installMcpManagerRpc(ctx, manager, options = {}) {
           }
         }
         return { ok: true, value: layerSnapshot() }
+      }
+      if (endpoint === 'oauth-login' || endpoint === 'oauth-logout' || endpoint === 'oauth-status') {
+        if (
+          typeof payload !== 'object' ||
+          payload === null ||
+          Array.isArray(payload) ||
+          typeof payload.server !== 'string' ||
+          payload.server.trim() === ''
+        ) {
+          return {
+            ok: false,
+            error: {
+              code: 'bad-request',
+              message: 'OAuth endpoints require a non-empty Server name.',
+              details: { issues: [] },
+            },
+          }
+        }
+        if (oauth === undefined) {
+          return {
+            ok: false,
+            error: {
+              code: 'mcp-oauth-failed',
+              message: 'OAuth support is not available on this Adapter',
+              details: { issues: [] },
+            },
+          }
+        }
+        const serverName = payload.server.trim()
+        try {
+          if (endpoint === 'oauth-login') {
+            return { ok: true, value: await oauth.startLogin(serverName) }
+          }
+          if (endpoint === 'oauth-logout') {
+            return { ok: true, value: await oauth.logout(serverName) }
+          }
+          return { ok: true, value: await oauth.status(serverName) }
+        } catch (error) {
+          return {
+            ok: false,
+            error: {
+              code: 'mcp-oauth-failed',
+              message: errorMessage(error),
+              details: { issues: [] },
+            },
+          }
+        }
       }
       if (endpoint === 'reconnect') {
         if (

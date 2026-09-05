@@ -1,5 +1,9 @@
 import { installMcpCommands } from './commands.js'
 import { installMcpManager, installMcpManagerRpc } from './manager.js'
+import { createMcpConnection } from './mcp-connection.js'
+import { installMcpOauthCommands } from './oauth-commands.js'
+import { createFileTokenStore } from './oauth.js'
+import { installMcpOauth } from './oauth-service.js'
 import { installMcpPromptCommand } from './prompt-commands.js'
 import { installMcpPromotions } from './promotions.js'
 import { installMcpProxyTool } from './proxy-tool.js'
@@ -16,21 +20,29 @@ export function apply(ctx) {
   installMcpSettings(ctx, (settingsCtx, scope) => {
     const layeredScope = installWorkspaceLayer(settingsCtx, scope)
     settingsCtx.inject(['timer'], (managerCtx) => {
-      const manager = installMcpManager(managerCtx, layeredScope)
+      const store = createFileTokenStore()
+      let oauth
+      const manager = installMcpManager(managerCtx, layeredScope, {
+        connectionFactory: (serverName, config, callbacks, signal, sdk) =>
+          createMcpConnection(serverName, config, callbacks, signal, sdk, {
+            store,
+            onAuthorizationRequired: (url) =>
+              oauth?.noteAuthorizationRequired(serverName, url),
+          }),
+      })
+      oauth = installMcpOauth(managerCtx, manager, scope, { store })
       managerCtx.inject(['connection'], (rpcCtx) => {
         installMcpManagerRpc(rpcCtx, manager, {
           layerSnapshot: () => layeredScope.layerSnapshot(),
+          oauth,
         })
       })
-      managerCtx.inject(['commands'], (cmdCtx) => {
-        installMcpCommands(cmdCtx, manager, scope)
-      })
+      installMcpCommands(managerCtx, manager, scope)
+      installMcpOauthCommands(managerCtx, manager, scope, oauth)
+      installMcpPromptCommand(managerCtx, manager)
       managerCtx.inject(['tools'], (toolCtx) => {
         installMcpProxyTool(toolCtx, manager)
         installMcpPromotions(toolCtx, manager, layeredScope)
-      })
-      managerCtx.inject(['commands'], (commandCtx) => {
-        installMcpPromptCommand(commandCtx, manager)
       })
     })
   })
@@ -39,6 +51,9 @@ export function apply(ctx) {
 export * from './commands.js'
 export * from './manager.js'
 export * from './mcp-connection.js'
+export * from './oauth-commands.js'
+export * from './oauth-service.js'
+export * from './oauth.js'
 export * from './output-guard.js'
 export * from './prompt-commands.js'
 export * from './promotions.js'
