@@ -10,6 +10,10 @@ import { installMcpSettingsStyles } from './styles.js'
 // `remote` rides the 0.1.2-rc.1+ settings write surface (see settings-api.js);
 // it exists on every harness generation, while `connection.api` only on
 // 0.1.1-rc.2, so both stay declared and the resolution happens at apply time.
+// `remote.settings` deliberately stays UNDECLARED: on 0.1.2-rc.1 it is a
+// mounted dotted service read through the inject-free `ctx.get`, and
+// declaring it would park the plugin forever on 0.1.1-rc.2, where the
+// namespace is never mounted.
 export const inject = ['slots', 'settingsScope', 'connection', 'remote']
 
 export function apply(ctx) {

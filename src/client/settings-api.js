@@ -15,7 +15,7 @@
  * `remote` face when it exists: it is the only one DSH 0.1.2-rc.1 provides.
  */
 export function createSettingsApi(ctx) {
-  const remoteSettings = ctx.remote?.settings
+  const remoteSettings = readRemoteSettings(ctx)
   if (remoteSettings !== undefined) return remoteSettingsApi(remoteSettings)
 
   const connectionSettings = ctx.connection?.api?.settings
@@ -26,6 +26,35 @@ export function createSettingsApi(ctx) {
     + 'or ctx.connection.api.settings (DSH 0.1.1-rc.2). Upgrade '
     + '@auggieteo/dsh-mcp-adapter to a release supporting this harness.',
   )
+}
+
+/**
+ * Read the mounted `remote.settings` namespace across generations without
+ * declaring it in `inject`.
+ *
+ * On DSH 0.1.2-rc.1 the namespace is a traced dotted service: reading it as
+ * `ctx.remote.settings` makes cordis compose the `remote.settings` key and
+ * throw `cannot get property "remote.settings" without inject` unless the
+ * plugin declares that exact service. It must stay undeclared anyway — on
+ * 0.1.1-rc.2 the namespace is never mounted, and a declared-but-missing
+ * service keeps the plugin fiber from ever applying. `ctx.get` is cordis's
+ * documented inject-free read: on 0.1.2-rc.1 it resolves the mounted
+ * namespace through the root isolate; on 0.1.1-rc.2 it answers undefined,
+ * leaving the `connection.api.settings` fallback reachable. The direct
+ * `ctx.remote?.settings` read stays as the fallback for runner generations
+ * that expose the face as a plain property (and for test doubles).
+ */
+function readRemoteSettings(ctx) {
+  if (typeof ctx.get === 'function') {
+    try {
+      const mounted = ctx.get('remote.settings')
+      if (mounted !== undefined) return mounted
+    } catch { /* fall through to the direct read */ }
+  }
+  try {
+    return ctx.remote?.settings
+  } catch { /* the governed dotted read on 0.1.2-rc.1 — ctx.get already covered it */ }
+  return undefined
 }
 
 /** Wrap the 0.1.2-rc.1 `remote.settings` face in the controller's contract. */

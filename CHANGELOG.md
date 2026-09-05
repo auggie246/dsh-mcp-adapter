@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- The plugin failed to load on DSH 0.1.2-rc.1 with `failed to apply loader entry … cannot get property "remote.settings" without inject`: the runner mounts the settings namespace as the traced dotted service `remote.settings`, so the plain `ctx.remote?.settings` read is governed and throws for plugins that do not declare it — while declaring it would park the plugin forever on 0.1.1-rc.2, where the namespace is never mounted. The write face is now resolved through the inject-free `ctx.get('remote.settings')`, which works on both generations ([ADR 0009](docs/adr/0009-dual-generation-settings-api.md)).
 - The Add Server and Import JSON dialogs follow the host dialog theme again: the modal card now surfaces on `bg-layer-2` with the shared `--dsw-elevation-prominent` treatment and the overlay mask blurs like the host Modal primitive, instead of the off-palette `bg-overlay` fill and a hardcoded drop shadow.
 
 ## [v0.2.0] - 2026-09-05
