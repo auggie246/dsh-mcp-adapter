@@ -1,7 +1,10 @@
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 
-export const MCP_SETTINGS_NAMESPACE = settingsNamespace('mcp')
+// The plain namespace string works on both supported harness generations:
+// DSH 0.1.1-rc.2 brands it via the (removed-in-0.1.2-rc.1) `settingsNamespace`
+// export, while 0.1.2-rc.1 validates the raw string inside `register` itself.
+// Branding was type-only, so no runtime behavior changes either way.
+export const MCP_SETTINGS_NAMESPACE = 'mcp'
 
 const optionalString = () => z.string().required(false)
 
