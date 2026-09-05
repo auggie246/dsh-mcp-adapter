@@ -23,15 +23,19 @@ mcp:
       url: https://mcp.example.com/api
       headers:
         Authorization: Bearer example-token
+    github:
+      url: https://mcp.example.com/other
+      auth: oauth
+      scopes: [repo, read:org]
 ```
 
-Each Server configures exactly one Transport: `command` for stdio, or `url` for streamable HTTP with SSE fallback. Adapter extension fields are `disabled`, `autoAllow`, `lifecycle` (`lazy` only in v1), `idleTimeoutMinutes` (default `10`), and `promotedTools`.
+Each Server configures exactly one Transport: `command` for stdio, or `url` for streamable HTTP with SSE fallback. Adapter extension fields are `auth` (`headers` default, or `oauth` for HTTP Servers), `scopes` (OAuth scopes, requires `auth: oauth`), `disabled`, `autoAllow`, `lifecycle` (`lazy` only in v1), `idleTimeoutMinutes` (default `10`), and `promotedTools`.
 
 The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. Each `env` and `headers` value has the DSH `secret` schema role. Wire views retain each key and redact its value.
 
 ## Settings page
 
-Open **Settings > MCP** to add, import, edit, reconnect, disable, or delete a Server. The Server list shows live connection state and cached tool counts. The detail panel manages Transport fields, secret values, Auto-allow, the idle timeout, and Promotions.
+Open **Settings > MCP** to add, import, edit, reconnect, disable, or delete a Server. The Server list shows live connection state and cached tool counts. The detail panel manages Transport fields, secret values, Auto-allow, the idle timeout, and Promotions. HTTP Servers pick their HTTP authentication mode (static headers or OAuth 2.0 with PKCE) and, for OAuth, enter the scopes to request.
 
 JSON import accepts the standard `{ "mcpServers": { ... } }` shape. Import replaces matching Server entries and preserves Servers absent from the import.
 
@@ -42,6 +46,14 @@ Every page write carries the latest namespace revision. Field edits use path mut
 The Host creates no unpromoted Server connection at startup. The first tool-list or tool-call request connects the Server and fills an in-memory metadata cache. A persisted Promotion can connect once to rebuild its native input schema. MCP `tools/list_changed` notifications refresh the cache. The default idle timeout closes the connection after 10 minutes without a request; the next request reconnects it.
 
 Changing, disabling, or removing a Server closes its connection and clears its cache. Re-enabling a Server restores the lazy behavior. A Connection RPC channel, `/mcp-adapter`, exposes detached `status`, `catalog`, and combined `overview` snapshots. Its `reconnect` endpoint restarts one named Server. These endpoints never expose Config secrets or SDK objects.
+
+## OAuth
+
+Remote HTTP Servers can authenticate with OAuth 2.0 authorization code flow and PKCE instead of static headers. Set `auth: oauth` on the Server (and optionally `scopes`), then sign in from **Settings > MCP** — the detail panel shows the sign-in state and Sign in / Sign out buttons — or with the `/mcp-auth [server] [login|logout|status]` command (`/mcp-auth` alone lists every OAuth Server).
+
+Sign in opens the provider's authorization page in your browser through the DSH web session. The Adapter listens on a local loopback callback, validates the state parameter, exchanges the code, and finishes the flow in the background; the Server then reconnects with the fresh tokens. The consent handoff never carries token material through the RPC channel.
+
+Tokens live in `${DSH_HOME:-~/.dsh}/mcp-auth/tokens.json` (directory `0700`, file `0600`, atomic writes), one record per Server, bound to the Server URL they were issued for — changing the URL requires a fresh sign-in. The SDK transports refresh expired access tokens through the stored refresh token on the next 401; when no refresh token remains, the Server reports that it needs re-authorization instead of starting a browser flow on its own. Sign out deletes the record and disconnects the Server. Exactly one sign-in flow may run per Server at a time. See [ADR 0008](./docs/adr/0008-oauth-for-http-servers.md).
 
 ## Proxy Tool
 

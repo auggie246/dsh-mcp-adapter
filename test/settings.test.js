@@ -52,6 +52,8 @@ test('resolves standard stdio Config and Adapter defaults', () => {
           args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
           env: { LOG_LEVEL: 'warn' },
           headers: {},
+          auth: 'headers',
+          scopes: [],
           disabled: false,
           autoAllow: false,
           lifecycle: 'lazy',
@@ -77,8 +79,48 @@ test('resolves standard HTTP Config with bearer headers', () => {
 
   assert.equal(config.mcpServers.linear.url, 'https://mcp.example.test/api')
   assert.equal(config.mcpServers.linear.autoAllow, true)
+  assert.equal(config.mcpServers.linear.auth, 'headers')
+  assert.deepEqual(config.mcpServers.linear.scopes, [])
   assert.deepEqual(config.mcpServers.linear.args, [])
   assert.deepEqual(config.mcpServers.linear.env, {})
+})
+
+test('resolves OAuth Config for remote HTTP Servers', () => {
+  const config = resolve({
+    mcpServers: {
+      linear: {
+        url: 'https://mcp.example.test/api',
+        auth: 'oauth',
+        scopes: ['read', 'write'],
+      },
+    },
+  })
+  assert.equal(config.mcpServers.linear.auth, 'oauth')
+  assert.deepEqual(config.mcpServers.linear.scopes, ['read', 'write'])
+  assert.deepEqual(config.mcpServers.linear.headers, {})
+})
+
+test('rejects OAuth on stdio Servers and scopes without OAuth', () => {
+  assert.throws(
+    () => resolve({ mcpServers: { local: { command: 'node', auth: 'oauth' } } }),
+    /mcp\.mcpServers\.local\.auth: OAuth requires the HTTP Transport/,
+  )
+  assert.throws(
+    () =>
+      resolve({
+        mcpServers: {
+          remote: { url: 'https://mcp.example.test/api', scopes: ['read'] },
+        },
+      }),
+    /mcp\.mcpServers\.remote\.scopes: scopes require auth "oauth"/,
+  )
+  assert.throws(
+    () =>
+      resolve({
+        mcpServers: { remote: { url: 'https://mcp.example.test/api', auth: 'basic' } },
+      }),
+    /auth/,
+  )
 })
 
 test('redacts secret values while preserving their editable key paths', () => {
