@@ -99,7 +99,12 @@ function useEscapeClose(onClose) {
   }, [onClose])
 }
 
+/**
+ * The single entry point for adding Servers: an Input fields mode for one
+ * Server, or a Paste JSON mode for a standard `mcpServers` object.
+ */
 function AddServerDialog({ controller, busy, onClose }) {
+  const [mode, setMode] = useState('form')
   const [name, setName] = useState('')
   const [transport, setTransport] = useState('stdio')
   const [command, setCommand] = useState('')
@@ -107,11 +112,28 @@ function AddServerDialog({ controller, busy, onClose }) {
   const [argsText, setArgsText] = useState('[]')
   const [auth, setAuth] = useState('headers')
   const [scopesText, setScopesText] = useState('')
+  const [jsonText, setJsonText] = useState('{\n  "mcpServers": {\n    \n  }\n}')
   const [error, setError] = useState()
   useEscapeClose(onClose)
+  const switchMode = (next) => {
+    setMode(next)
+    setError(undefined)
+  }
   const submit = async (event) => {
     event.preventDefault()
     setError(undefined)
+    if (mode === 'json') {
+      try {
+        parseMcpImport(jsonText)
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : String(nextError))
+        return
+      }
+      const result = await controller.importJson(jsonText)
+      if (result) onClose()
+      else setError('The Host rejected this import. Review the page error and retry.')
+      return
+    }
     let config
     try {
       config = normalizeServerConfig(
@@ -135,11 +157,52 @@ function AddServerDialog({ controller, busy, onClose }) {
         <div className="mcp-card-head">
           <div>
             <h3 className="mcp-modal-title">Add Server</h3>
-            <p className="mcp-muted">Configure one stdio command or one HTTP URL.</p>
+            <p className="mcp-muted">Fill in the fields for one Server, or paste an mcpServers JSON.</p>
           </div>
           <button type="button" className="mcp-button" onClick={onClose}>Close</button>
         </div>
+        <div className="mcp-dialog-tabs" role="tablist" aria-label="Add Server input mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'form'}
+            className={mode === 'form' ? 'mcp-dialog-tab mcp-dialog-tab-active' : 'mcp-dialog-tab'}
+            disabled={busy}
+            onClick={() => switchMode('form')}
+          >
+            Input fields
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'json'}
+            className={mode === 'json' ? 'mcp-dialog-tab mcp-dialog-tab-active' : 'mcp-dialog-tab'}
+            disabled={busy}
+            onClick={() => switchMode('json')}
+          >
+            Paste JSON
+          </button>
+        </div>
         {error !== undefined && <div className="mcp-error" role="alert">{error}</div>}
+        {mode === 'json' && (
+          <label className="mcp-field">
+            <span className="mcp-label">MCP Config JSON</span>
+            <textarea
+              autoFocus
+              className="mcp-textarea"
+              style={{ minHeight: 280 }}
+              value={jsonText}
+              disabled={busy}
+              spellCheck={false}
+              onChange={(event) => setJsonText(event.target.value)}
+            />
+            <span className="mcp-muted">
+              One or more Servers. A name that already exists is replaced.
+            </span>
+          </label>
+        )}
+        {mode === 'form' && (
+          <>
         <label className="mcp-field">
           <span className="mcp-label">Name</span>
           <input
@@ -236,65 +299,13 @@ function AddServerDialog({ controller, busy, onClose }) {
             )}
           </>
         )}
+        </>
+        )}
         <div className="mcp-actions">
           <button type="submit" className="mcp-button mcp-button-primary" disabled={busy}>
-            {busy ? 'Adding…' : 'Add Server'}
-          </button>
-          <button type="button" className="mcp-button" disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
-function ImportDialog({ controller, busy, onClose }) {
-  const [text, setText] = useState('{\n  "mcpServers": {\n    \n  }\n}')
-  const [error, setError] = useState()
-  useEscapeClose(onClose)
-  const submit = async (event) => {
-    event.preventDefault()
-    setError(undefined)
-    try {
-      parseMcpImport(text)
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError))
-      return
-    }
-    const result = await controller.importJson(text)
-    if (result) onClose()
-    else setError('The Host rejected this import. Review the page error and retry.')
-  }
-
-  return (
-    <div className="mcp-overlay" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose()
-    }}>
-      <form className="mcp-modal-card" aria-label="Import MCP Servers" onSubmit={submit}>
-        <div className="mcp-card-head">
-          <div>
-            <h3 className="mcp-modal-title">Import JSON</h3>
-            <p className="mcp-muted">Paste a standard object with an mcpServers property.</p>
-          </div>
-          <button type="button" className="mcp-button" onClick={onClose}>Close</button>
-        </div>
-        {error !== undefined && <div className="mcp-error" role="alert">{error}</div>}
-        <label className="mcp-field">
-          <span className="mcp-label">MCP Config JSON</span>
-          <textarea
-            autoFocus
-            className="mcp-textarea"
-            style={{ minHeight: 280 }}
-            value={text}
-            disabled={busy}
-            spellCheck={false}
-            onChange={(event) => setText(event.target.value)}
-          />
-        </label>
-        <div className="mcp-actions">
-          <button type="submit" className="mcp-button mcp-button-primary" disabled={busy}>
-            {busy ? 'Importing…' : 'Import Servers'}
+            {busy
+              ? mode === 'json' ? 'Importing…' : 'Adding…'
+              : mode === 'json' ? 'Import Servers' : 'Add Server'}
           </button>
           <button type="button" className="mcp-button" disabled={busy} onClick={onClose}>
             Cancel
@@ -813,14 +824,6 @@ export function McpSettingsPage({ controller }) {
         <div className="mcp-actions">
           <button
             type="button"
-            className="mcp-button"
-            disabled={snapshot.busy || !settings.writable}
-            onClick={() => setDialog('import')}
-          >
-            Import JSON
-          </button>
-          <button
-            type="button"
             className="mcp-button mcp-button-primary"
             disabled={snapshot.busy || !settings.writable}
             onClick={() => setDialog('add')}
@@ -840,7 +843,9 @@ export function McpSettingsPage({ controller }) {
       {names.length === 0 ? (
         <div className="mcp-empty">
           <h2 className="mcp-card-title">No MCP Servers</h2>
-          <p className="mcp-muted">Add a Server or import an existing mcpServers Config.</p>
+          <p className="mcp-muted">
+            Add a Server through its input fields, or paste an existing mcpServers JSON.
+          </p>
           <div className="mcp-actions">
             <button
               type="button"
@@ -849,14 +854,6 @@ export function McpSettingsPage({ controller }) {
               onClick={() => setDialog('add')}
             >
               Add Server
-            </button>
-            <button
-              type="button"
-              className="mcp-button"
-              disabled={snapshot.busy || !settings.writable}
-              onClick={() => setDialog('import')}
-            >
-              Import JSON
             </button>
           </div>
         </div>
@@ -907,9 +904,6 @@ export function McpSettingsPage({ controller }) {
 
       {dialog === 'add' && (
         <AddServerDialog controller={controller} busy={snapshot.busy} onClose={() => setDialog()} />
-      )}
-      {dialog === 'import' && (
-        <ImportDialog controller={controller} busy={snapshot.busy} onClose={() => setDialog()} />
       )}
     </section>
   )

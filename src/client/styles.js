@@ -74,6 +74,12 @@ export const MCP_SETTINGS_CSS = `
 @keyframes mcp-fade{from{opacity:0}to{opacity:1}}
 @keyframes mcp-pop{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
 .mcp-modal-title{margin:0;font-size:15px;line-height:22px;font-weight:600}
+.mcp-dialog-tabs{display:inline-flex;gap:2px;align-self:flex-start;border:1px solid var(--dsw-alias-border-l2);border-radius:16px;padding:2px;background:var(--dsw-alias-bg-layer-3)}
+.mcp-dialog-tab{height:26px;border:0;border-radius:14px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0 12px;font:inherit;font-size:12px;cursor:pointer;transition:background .12s ease,color .12s ease}
+.mcp-dialog-tab:hover:not(:disabled):not(.mcp-dialog-tab-active){color:var(--dsw-alias-label-primary)}
+.mcp-dialog-tab:disabled{cursor:not-allowed;opacity:.5}
+.mcp-dialog-tab-active{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}
+.mcp-dialog-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
 .mcp-confirm{border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px;background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent)}
 @container (max-width:660px){.mcp-layout{grid-template-columns:minmax(0,1fr)}.mcp-sidebar{position:static;flex-direction:row;overflow-x:auto;padding-bottom:2px}.mcp-server-button{width:auto;flex:none;white-space:nowrap}}
 @container (max-width:480px){.mcp-field-row{grid-template-columns:minmax(0,1fr)}.mcp-secret-row{grid-template-columns:minmax(0,1fr) auto}.mcp-secret-row .mcp-input:first-child{grid-column:1 / -1}.mcp-card-head .mcp-actions{margin-left:0;width:100%}.mcp-toolbar{align-items:flex-start}}
