@@ -69,9 +69,18 @@ export const McpSettingsSchema = z.object({
     .dict(McpServerSchema)
     .default({})
     .description('Global MCP servers, keyed by their unique server name.'),
+  skillInstall: z
+    .union(['file', 'runtime', 'off'])
+    .default('file')
+    .description(
+      'How the bundled mcp-adapter agent skill is installed: file (copy to '
+      + '$DSH_HOME/skills/mcp-adapter/ so Settings > Skills lists it; an '
+      + 'existing file is never overwritten), runtime (register in memory '
+      + 'only), or off (no skill). Read once at Adapter startup.',
+    ),
 })
 
-const TOP_LEVEL_KEYS = new Set(['mcpServers'])
+const TOP_LEVEL_KEYS = new Set(['mcpServers', 'skillInstall'])
 const SERVER_KEYS = new Set([
   'command',
   'args',

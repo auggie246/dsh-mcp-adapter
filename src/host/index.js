@@ -19,9 +19,13 @@ export const inject = []
 
 export function apply(ctx) {
   // The bundled agent skill is independent of every other Adapter feature: a
-  // deployment without the skills service simply gets no skill entry.
-  ctx.inject(['skills'], (skillCtx) => installMcpSkill(skillCtx))
+  // deployment without the skills service simply gets no skill entry. Sibling
+  // inject fibers run in registration order while the services exist, so the
+  // settings callback reads `skillInstall` before the skills callback runs;
+  // without the settings service the skill module's 'file' default applies.
+  let skillInstall
   installMcpSettings(ctx, (settingsCtx, scope) => {
+    skillInstall = scope.get()?.skillInstall
     const layeredScope = installWorkspaceLayer(settingsCtx, scope)
     settingsCtx.inject(['timer'], (managerCtx) => {
       const store = createFileTokenStore()
@@ -59,6 +63,7 @@ export function apply(ctx) {
       })
     })
   })
+  ctx.inject(['skills'], (skillCtx) => installMcpSkill(skillCtx, { skillInstall }))
 }
 
 export * from './commands.js'

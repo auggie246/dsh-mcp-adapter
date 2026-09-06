@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `skillInstall` Config field (`file` by default, `runtime`, or `off`) controlling how the bundled `mcp-adapter` agent skill is installed. `file` copies `skills/mcp-adapter/SKILL.md` verbatim to `$DSH_HOME/skills/mcp-adapter/SKILL.md` at startup (atomic temp-file-then-rename write, never a symlink), so the DSH filesystem skill provider lists it under Settings > Skills > DSH skills. `runtime` keeps the previous in-memory registration; `off` installs nothing. The mode is read once at Adapter startup.
+
+### Changed
+
+- The bundled agent skill now installs as a real file by default instead of registering only in memory. The installed file is never overwritten: an identical file is left untouched, and a file edited by a human wins with one Host warning naming the installed path and the package version — delete `$DSH_HOME/skills/mcp-adapter/` and restart DSH to refresh it from the package. A failed file install (for example a read-only `$DSH_HOME`) falls back to the runtime registration with a warning; the skill stays a convenience and never throws.
+
 ## [v0.2.1] - 2026-09-06
 
 ### Added

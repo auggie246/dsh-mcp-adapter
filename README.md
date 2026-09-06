@@ -130,9 +130,12 @@ mcp:
       url: https://mcp.example.com/other
       auth: oauth
       scopes: [repo, read:org]
+  skillInstall: file
 ```
 
 Each Server configures exactly one Transport: `command` for stdio, or `url` for streamable HTTP with SSE fallback. Adapter extension fields are `auth` (`headers` by default, or `oauth` for HTTP Servers), `scopes` (OAuth scopes, requires `auth: oauth`), `disabled`, `autoAllow`, `lifecycle` (`lazy`, `eager`, `keep-alive`, or `lazy-keep-alive`; default `lazy`), `idleTimeoutMinutes` (default `10`), and `promotedTools`.
+
+The one top-level Adapter field is `skillInstall` (`file` by default, `runtime`, or `off`); see [Agent skill](#agent-skill).
 
 The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. Each `env` and `headers` value has the DSH `secret` schema role. Wire views retain each key and redact its value.
 
@@ -211,7 +214,13 @@ The SDK transports refresh expired access tokens through the stored refresh toke
 
 ### Agent skill
 
-The package bundles a model-facing skill in `skills/mcp-adapter/SKILL.md`. When the DSH `skills` service is present, the Adapter registers it at startup as a runtime skill named `mcp-adapter`, so agents learn the search → describe → call workflow, how to read failure messages (including the OAuth sign-in hint), and which commands belong to the human. The frontmatter drives routing; edit the file to change the guidance, and a DSH restart picks the edit up.
+The package bundles a model-facing skill in `skills/mcp-adapter/SKILL.md`, so agents learn the search → describe → call workflow, how to read failure messages (including the OAuth sign-in hint), and which commands belong to the human. The top-level `skillInstall` Config field controls how the Adapter installs it; the mode is read once at Adapter startup, so a change takes effect on the next DSH restart.
+
+- `file` (default): on startup the Adapter copies the bundled `SKILL.md` verbatim to `$DSH_HOME/skills/mcp-adapter/SKILL.md` (an atomic temp-file-then-rename write, never a symlink). The DSH filesystem skill provider discovers the file, so the skill shows under **Settings > Skills > DSH skills** and joins the session catalog without a restart of an already-running session. When the file install fails, the Adapter falls back to the runtime registration below and logs one warning.
+- `runtime`: the Adapter registers the skill in memory on the DSH `skills` service only. It reaches agents but never appears on the Settings > Skills page.
+- `off`: the Adapter installs no skill.
+
+The installed file is never overwritten. If `$DSH_HOME/skills/mcp-adapter/SKILL.md` already exists, your edit wins: an identical file is left untouched, and a differing file gets one Host warning naming the installed path and the package version. To refresh the installed copy from the package, delete `$DSH_HOME/skills/mcp-adapter/` and restart DSH. Editing the installed file changes what the session catalog serves; the edit survives plugin restarts.
 
 ## Architecture
 

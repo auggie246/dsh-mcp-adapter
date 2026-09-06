@@ -30,8 +30,8 @@ class MemorySettings extends SettingsProvider {
   }
 }
 
-test('resolves an absent Config to an empty server list', () => {
-  assert.deepEqual(resolve({}), { mcpServers: {} })
+test('resolves an absent Config to an empty server list and the default skill mode', () => {
+  assert.deepEqual(resolve({}), { mcpServers: {}, skillInstall: 'file' })
 })
 
 test('resolves standard stdio Config and Adapter defaults', () => {
@@ -61,6 +61,7 @@ test('resolves standard stdio Config and Adapter defaults', () => {
           promotedTools: [],
         },
       },
+      skillInstall: 'file',
     },
   )
 })
@@ -187,6 +188,17 @@ test('rejects invalid or mismatched transport details', () => {
   )
 })
 
+test('accepts every skillInstall mode and rejects invalid ones', () => {
+  for (const skillInstall of ['file', 'runtime', 'off']) {
+    const config = resolve({ mcpServers: {}, skillInstall })
+    assert.equal(config.skillInstall, skillInstall)
+  }
+  assert.throws(
+    () => resolve({ mcpServers: {}, skillInstall: 'always' }),
+    /expected "file" \| "runtime" \| "off" but got "always"/,
+  )
+})
+
 test('accepts every lifecycle value and rejects invalid ones', () => {
   for (const lifecycle of ['lazy', 'eager', 'keep-alive', 'lazy-keep-alive']) {
     const config = resolve({ mcpServers: { demo: { command: 'node', lifecycle } } })
@@ -220,7 +232,7 @@ test('registers mcp, round-trips a valid update, and emits settings/updated', as
     const settings = root.get('settings')
     const initial = settings.describe().find(({ ns }) => ns === MCP_SETTINGS_NAMESPACE)
     assert.ok(initial)
-    assert.deepEqual(initial.value, { mcpServers: {} })
+    assert.deepEqual(initial.value, { mcpServers: {}, skillInstall: 'file' })
     assert.equal(initial.applies, 'live')
 
     await settings.update(MCP_SETTINGS_NAMESPACE, {

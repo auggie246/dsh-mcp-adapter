@@ -387,6 +387,60 @@ test('controller writes through the current namespace revision and folds the ans
   await controller.dispose()
 })
 
+test('the write path carries a top-level skillInstall mutation through untouched', async () => {
+  const mutations = []
+  const scope = {
+    getSnapshot: () => ({
+      status: 'ready',
+      value: { mcpServers: {}, skillInstall: 'file' },
+      revision: 2,
+      writable: true,
+    }),
+    subscribe() {
+      return () => {}
+    },
+  }
+  const describe = {
+    getSnapshot: () => ({ status: 'ready', view: {}, error: null }),
+    subscribe() {
+      return () => {}
+    },
+    async ensure() {},
+    acceptView() {},
+  }
+  const controller = new McpSettingsController({
+    scope,
+    describe,
+    settingsApi: {
+      async mutate(payload) {
+        mutations.push(payload)
+        return {
+          result: {
+            ok: true,
+            value: {
+              ns: 'mcp',
+              schema: {},
+              value: { mcpServers: {}, skillInstall: 'runtime' },
+              applies: 'live',
+              secrets: [],
+              revision: payload.expectedRevision + 1,
+            },
+          },
+        }
+      },
+    },
+    rpc: async () => ({ ok: true, value: { status: { servers: [] }, catalog: { servers: [] } } }),
+  })
+
+  await controller.settingsWrite('mutate', {
+    ops: [{ op: 'set', path: ['skillInstall'], value: 'runtime' }],
+  })
+  assert.deepEqual(mutations[0].ops, [
+    { op: 'set', path: ['skillInstall'], value: 'runtime' },
+  ])
+  await controller.dispose()
+})
+
 test('loadOauthStatuses probes OAuth Servers defined only in the workspace layer', async () => {
   const rpcCalls = []
   const scope = {
