@@ -4,7 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v0.2.1] - 2026-09-06
+
+### Added
+
+- `scripts/patch-dsh-settings-nav-icon.mjs`: patches the installed DSH settings shell so the `mcp` nav row in Settings shows a connection icon (`IconLinkOutline16`) instead of the generic settings-gear fallback. The icon mapping is DSH shell chrome that this plugin cannot reach through the `settings.section` slot (it accepts only `id`, `order`, `label`). The insert is idempotent and marked `// dsh-mcp-adapter`; `--revert` restores the original bytes. A DSH upgrade replaces the patched file, so re-run the script afterwards, then restart `dsh web` and refresh the page.
+
+### Changed
+
+- Settings > MCP has a single Add Server entry point: the dialog now offers an Input fields mode for one Server and a Paste JSON mode for a standard `mcpServers` object (existing names are replaced), replacing the separate Import JSON button and dialog in both the toolbar and the empty state.
 
 ### Fixed
 
