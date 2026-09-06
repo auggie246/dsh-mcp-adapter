@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v0.2.2] - 2026-09-06
 
 ### Added
 
@@ -66,5 +66,6 @@ Everything from v0.1.2 through this release: the six deferred v1 features (#8–
 
 Initial releases of the Adapter through v1 issues #1–#7: proxy-first tool surface, Config in the DSH settings namespace, promotion registry, lazy lifecycle, output guard, settings page, and the `/mcp-adapter` RPC channel. See [docs/verification/v1-e2e.md](docs/verification/v1-e2e.md).
 
+[v0.2.2]: https://github.com/auggie246/dsh-mcp-adapter/compare/v0.2.1...v0.2.2
 [v0.2.0]: https://github.com/auggie246/dsh-mcp-adapter/compare/v0.1.2...v0.2.0
 [v0.1.2]: https://github.com/auggie246/dsh-mcp-adapter/releases/tag/v0.1.2
