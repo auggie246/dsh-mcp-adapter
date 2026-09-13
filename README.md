@@ -70,7 +70,7 @@ Then restart DSH. The Settings panel (`⌘,` / sidebar foot) gains an **MCP** se
 | 0.1.1-rc.2 | Supported. The client falls back to the legacy `connection.api.settings` face when its module applies. |
 | Anything else | Unsupported. The client fails with an explicit "No DSH settings write API" error instead of a crash. |
 
-Both generations run the same host seam: the peer dependency accepts `@deepseek-ai/dsh-settings` `^0.1.1-rc.2 || ^0.1.2-rc.1`, and the Settings page, commands, and tools behave identically on either. The Adapter picks the right face when its client module applies. See [ADR 0009](./docs/adr/0009-dual-generation-settings-api.md).
+Both generations run the same host seam: the peer dependency accepts `@deepseek-ai/dsh-settings` `^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1`, and the Settings page, commands, and tools behave identically on either. The Adapter picks the right face when its client module applies. See [ADR 0009](./docs/adr/0009-dual-generation-settings-api.md).
 
 ### Local development
 

@@ -72,11 +72,12 @@ function fakeDescribe() {
 /**
  * A fake client context in the shape of one harness generation.
  *
- * 0.1.2-rc.1 mounts the settings write face as the traced dotted service
- * `remote.settings` (positional arguments, flat `{ ok, value }` envelope):
- * reading it through `ctx.remote.settings` throws the runner's governance
- * error, and only the inject-free `ctx.get('remote.settings')` reaches it.
- * The `connection` service lost its `api` face entirely.
+ * 0.1.2-rc.1 and every newer generation checked so far (through 0.1.5-rc.2)
+ * mount the settings write face as the traced dotted service `remote.settings`
+ * (positional arguments, flat `{ ok, value }` envelope): reading it through
+ * `ctx.remote.settings` throws the runner's governance error, and only the
+ * inject-free `ctx.get('remote.settings')` reaches it. The `connection`
+ * service lost its `api` face entirely.
  * 0.1.1-rc.2 keeps the settings write surface on `connection.api.settings`
  * with a single request-object argument and a `{ result }` envelope, and
  * never mounts `remote.settings` (`ctx.get` answers undefined).
@@ -114,7 +115,10 @@ function fakeCtx({ generation, scopeRevision = 7, views, calls }) {
       },
     },
   }
-  if (generation === '0.1.2-rc.1') {
+  // Every generation except 0.1.1-rc.2 mounts the face identically: the
+  // 0.1.2-rc.1 → 0.1.5-rc.2 diff leaves the settings-controller source and the
+  // remotes mount list untouched.
+  if (generation !== '0.1.1-rc.2') {
     const settingsFace = {
       async update(ns, patch, expectedRevision) {
         calls.push(['remote.update', ns, patch, expectedRevision])
@@ -298,6 +302,36 @@ test('apply wires the 0.1.2-rc.1 remote settings face with positional writes', a
     7,
   ]])
   // The write answer folds back into the describe mirror and the revision.
+  assert.equal(describe.getSnapshot().view.revision, 8)
+  await controller.dispose()
+})
+
+test('apply wires the 0.1.5-rc.1 remote settings face identically', async () => {
+  const mod = await loadClientModule()
+  const calls = []
+  const { ctx, describe } = fakeCtx({
+    generation: '0.1.5-rc.1',
+    calls,
+    views: {
+      update: (ns, patch, expectedRevision) => okView(ns, patch, expectedRevision),
+      mutate: (ns, ops, expectedRevision) => okView(ns, {}, expectedRevision),
+    },
+  })
+  await applyWithFakeDocument(ctx, mod)
+
+  const controller = ctx.lastRegistered.inject().controller
+  const added = await controller.addServer('fixture', { command: 'node', args: ['server.mjs'] })
+  assert.equal(added, true)
+  assert.deepEqual(calls, [[
+    'remote.update',
+    'mcp',
+    {
+      mcpServers: {
+        fixture: normalizeServerConfig('fixture', { command: 'node', args: ['server.mjs'] }),
+      },
+    },
+    7,
+  ]])
   assert.equal(describe.getSnapshot().view.revision, 8)
   await controller.dispose()
 })
