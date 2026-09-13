@@ -1,6 +1,6 @@
 {
   "name": "@auggieteo/dsh-mcp-adapter",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "DSH plugin connecting the agent to MCP servers through one mcp proxy tool and a Settings > MCP page.",
   "type": "module",
   "license": "MIT",
