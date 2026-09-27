@@ -37,9 +37,18 @@ function fakeDocument() {
   }
 }
 
-function snapshotStore(value, revision) {
+/** One configForms entry controller, in the 0.1.7 snapshot shape. */
+function fakeForm(value, revision) {
   return {
-    snapshot: { status: 'ready', value, revision, writable: true },
+    snapshot: {
+      status: 'ready',
+      value,
+      base: undefined,
+      user: {},
+      revision,
+      writable: true,
+      mode: 'host',
+    },
     listeners: new Set(),
     getSnapshot() {
       return this.snapshot
@@ -53,7 +62,11 @@ function snapshotStore(value, revision) {
 
 function fakeDescribe() {
   return {
-    snapshot: { status: 'ready', view: { namespaces: [] }, error: null },
+    snapshot: {
+      status: 'ready',
+      view: { writable: true, hasDocument: true, namespaces: [] },
+      error: null,
+    },
     listeners: new Set(),
     getSnapshot() {
       return this.snapshot
@@ -64,27 +77,44 @@ function fakeDescribe() {
     },
     async ensure() {},
     acceptView(view) {
-      this.snapshot = { ...this.snapshot, view }
+      const namespaces = this.snapshot.view.namespaces
+      this.snapshot = {
+        ...this.snapshot,
+        view: {
+          ...this.snapshot.view,
+          namespaces: namespaces.some((row) => row.ns === view.ns)
+            ? namespaces.map((row) => (row.ns === view.ns ? view : row))
+            : [...namespaces, view],
+        },
+      }
     },
   }
 }
 
 /**
- * A fake client context in the shape of one harness generation.
+ * A fake client context in the DSH 0.1.7 shape.
  *
- * 0.1.2-rc.1 and every newer generation checked so far (through 0.1.5-rc.2)
- * mount the settings write face as the traced dotted service `remote.settings`
- * (positional arguments, flat `{ ok, value }` envelope): reading it through
+ * Reads and the write queue live behind the `configForms` service:
+ * `get(entryId)` answers the per-entry form controller and `describe()` the
+ * shared document mirror. The write face is the `remote` service's
+ * `settings` namespace: a traced dotted service with positional arguments
+ * and a flat `{ ok, value }` envelope — reading it through
  * `ctx.remote.settings` throws the runner's governance error, and only the
- * inject-free `ctx.get('remote.settings')` reaches it. The `connection`
- * service lost its `api` face entirely.
- * 0.1.1-rc.2 keeps the settings write surface on `connection.api.settings`
- * with a single request-object argument and a `{ result }` envelope, and
- * never mounts `remote.settings` (`ctx.get` answers undefined).
+ * inject-free `ctx.get('remote.settings')` reaches it.
  */
-function fakeCtx({ generation, scopeRevision = 7, views, calls }) {
-  const scope = snapshotStore({ mcpServers: {} }, scopeRevision)
+function fakeCtx({ scopeRevision = 7, views, calls }) {
+  const form = fakeForm({ mcpServers: {} }, scopeRevision)
   const describe = fakeDescribe()
+  const settingsFace = {
+    async update(ns, patch, expectedRevision) {
+      calls.push(['remote.update', ns, patch, expectedRevision])
+      return views.update(ns, patch, expectedRevision)
+    },
+    async mutate(ns, ops, expectedRevision) {
+      calls.push(['remote.mutate', ns, ops, expectedRevision])
+      return views.mutate(ns, ops, expectedRevision)
+    },
+  }
   const ctx = {
     disposals: [],
     lastRegistered: undefined,
@@ -93,8 +123,11 @@ function fakeCtx({ generation, scopeRevision = 7, views, calls }) {
       if (typeof dispose === 'function') ctx.disposals.push([name, dispose])
       return dispose
     },
-    settingsScope: {
-      bind: () => scope,
+    configForms: {
+      get: (entryId) => {
+        calls.push(['configForms.get', entryId])
+        return form
+      },
       describe: () => describe,
     },
     slots: {
@@ -115,45 +148,16 @@ function fakeCtx({ generation, scopeRevision = 7, views, calls }) {
       },
     },
   }
-  // Every generation except 0.1.1-rc.2 mounts the face identically: the
-  // 0.1.2-rc.1 → 0.1.5-rc.2 diff leaves the settings-controller source and the
-  // remotes mount list untouched.
-  if (generation !== '0.1.1-rc.2') {
-    const settingsFace = {
-      async update(ns, patch, expectedRevision) {
-        calls.push(['remote.update', ns, patch, expectedRevision])
-        return views.update(ns, patch, expectedRevision)
-      },
-      async mutate(ns, ops, expectedRevision) {
-        calls.push(['remote.mutate', ns, ops, expectedRevision])
-        return views.mutate(ns, ops, expectedRevision)
-      },
-    }
-    // The transport service is bare: the namespace lives only behind the
-    // mount, and the governed dotted access throws exactly like the runner.
-    ctx.remote = {}
-    Object.defineProperty(ctx.remote, 'settings', {
-      get() {
-        throw new Error('cannot get property "remote.settings" without inject')
-      },
-    })
-    ctx.get = (name) => (name === 'remote.settings' ? settingsFace : undefined)
-  } else {
-    ctx.get = () => undefined
-    ctx.connection.api = {
-      settings: {
-        async update(request) {
-          calls.push(['api.update', request])
-          return { result: await views.update(request.ns, request.patch, request.expectedRevision) }
-        },
-        async mutate(request) {
-          calls.push(['api.mutate', request])
-          return { result: await views.mutate(request.ns, request.ops, request.expectedRevision) }
-        },
-      },
-    }
-  }
-  return { ctx, scope, describe }
+  // The transport service is bare: the namespace lives only behind the
+  // mount, and the governed dotted access throws exactly like the runner.
+  ctx.remote = {}
+  Object.defineProperty(ctx.remote, 'settings', {
+    get() {
+      throw new Error('cannot get property "remote.settings" without inject')
+    },
+  })
+  ctx.get = (name) => (name === 'remote.settings' ? settingsFace : undefined)
+  return { ctx, form, describe }
 }
 
 function okView(ns, value, expectedRevision) {
@@ -161,6 +165,7 @@ function okView(ns, value, expectedRevision) {
     ok: true,
     value: {
       ns,
+      autoGenerate: true,
       schema: {},
       value,
       applies: 'live',
@@ -202,27 +207,45 @@ function applyWithFakeDocument(ctx, mod) {
   }
 }
 
-test('client inject declares every service it reads, including remote', async () => {
+test('client inject declares every service it reads, including configForms and remote', async () => {
   const mod = await loadClientModule()
   assert.deepEqual(
     [...mod.inject].sort(),
-    ['connection', 'remote', 'settingsScope', 'slots'],
+    ['configForms', 'connection', 'remote', 'slots'],
   )
 })
 
-test('client inject omits remote.settings: governed on 0.1.2-rc.1, never mounted on 0.1.1-rc.2', async () => {
-  // Declaring the dotted service would park the plugin fiber forever on
-  // 0.1.1-rc.2, where no provider ever mounts it; on 0.1.2-rc.1 the mounted
-  // namespace is reached through the inject-free `ctx.get` read instead.
+test('client inject omits remote.settings: it is governed and optional per profile', async () => {
+  // Declaring the dotted service would park the plugin fiber on a profile
+  // that never mounts the remotes bundle; the mounted namespace is reached
+  // through the inject-free `ctx.get` read instead.
   const mod = await loadClientModule()
   assert.equal(mod.inject.includes('remote.settings'), false)
+})
+
+test('apply reads the entry form from configForms under the Loader entry id', async () => {
+  const mod = await loadClientModule()
+  const calls = []
+  const { ctx } = fakeCtx({
+    calls,
+    views: {
+      update: (ns, patch, expectedRevision) => okView(ns, patch, expectedRevision),
+      mutate: (ns, ops, expectedRevision) => okView(ns, {}, expectedRevision),
+    },
+  })
+  await applyWithFakeDocument(ctx, mod)
+
+  assert.deepEqual(calls[0], ['configForms.get', 'mcp-adapter'])
+  const controller = ctx.lastRegistered.inject().controller
+  const added = await controller.addServer('fixture', { command: 'node', args: ['server.mjs'] })
+  assert.equal(added, true)
+  await controller.dispose()
 })
 
 test('apply resolves the mounted remote.settings namespace through ctx.get', async () => {
   const mod = await loadClientModule()
   const calls = []
   const { ctx } = fakeCtx({
-    generation: '0.1.2-rc.1',
     calls,
     views: {
       update: (ns, patch, expectedRevision) => okView(ns, patch, expectedRevision),
@@ -234,26 +257,21 @@ test('apply resolves the mounted remote.settings namespace through ctx.get', asy
   const controller = ctx.lastRegistered.inject().controller
   const added = await controller.addServer('fixture', { command: 'node', args: ['server.mjs'] })
   assert.equal(added, true)
-  assert.equal(calls[0][0], 'remote.update')
+  assert.equal(calls.some(([method]) => method === 'remote.update'), true)
   await controller.dispose()
 })
 
-test('apply still resolves a plain remote.settings property face (legacy runner shape)', async () => {
+test('apply still resolves a plain remote.settings property face (test-double shape)', async () => {
   const mod = await loadClientModule()
   const calls = []
   const views = {
     update: (ns, patch, expectedRevision) => okView(ns, patch, expectedRevision),
     mutate: (ns, ops, expectedRevision) => okView(ns, {}, expectedRevision),
   }
-  const { ctx } = fakeCtx({
-    generation: '0.1.1-rc.2',
-    calls,
-    views,
-  })
+  const { ctx } = fakeCtx({ calls, views })
   // A runner (or test double) that exposes the face as a plain property and
   // offers no inject-free `ctx.get` must still resolve through the direct read.
   delete ctx.get
-  delete ctx.connection.api
   ctx.remote = {
     settings: {
       async update(ns, patch, expectedRevision) {
@@ -271,15 +289,14 @@ test('apply still resolves a plain remote.settings property face (legacy runner 
   const controller = ctx.lastRegistered.inject().controller
   const added = await controller.addServer('fixture', { command: 'node', args: ['server.mjs'] })
   assert.equal(added, true)
-  assert.equal(calls[0][0], 'remote.update')
+  assert.equal(calls.at(-1)[0], 'remote.update')
   await controller.dispose()
 })
 
-test('apply wires the 0.1.2-rc.1 remote settings face with positional writes', async () => {
+test('apply wires the remote settings face with positional writes on the entry id', async () => {
   const mod = await loadClientModule()
   const calls = []
   const { ctx, describe } = fakeCtx({
-    generation: '0.1.2-rc.1',
     calls,
     views: {
       update: (ns, patch, expectedRevision) => okView(ns, patch, expectedRevision),
@@ -291,78 +308,31 @@ test('apply wires the 0.1.2-rc.1 remote settings face with positional writes', a
   const controller = ctx.lastRegistered.inject().controller
   const added = await controller.addServer('fixture', { command: 'node', args: ['server.mjs'] })
   assert.equal(added, true)
-  assert.deepEqual(calls, [[
-    'remote.update',
-    'mcp',
-    {
-      mcpServers: {
-        fixture: normalizeServerConfig('fixture', { command: 'node', args: ['server.mjs'] }),
+  assert.deepEqual(
+    calls.filter(([method]) => method.startsWith('remote.')),
+    [[
+      'remote.update',
+      'mcp-adapter',
+      {
+        mcpServers: {
+          fixture: normalizeServerConfig('fixture', { command: 'node', args: ['server.mjs'] }),
+        },
       },
-    },
-    7,
-  ]])
+      7,
+    ]],
+  )
   // The write answer folds back into the describe mirror and the revision.
-  assert.equal(describe.getSnapshot().view.revision, 8)
-  await controller.dispose()
-})
-
-test('apply wires the 0.1.5-rc.1 remote settings face identically', async () => {
-  const mod = await loadClientModule()
-  const calls = []
-  const { ctx, describe } = fakeCtx({
-    generation: '0.1.5-rc.1',
-    calls,
-    views: {
-      update: (ns, patch, expectedRevision) => okView(ns, patch, expectedRevision),
-      mutate: (ns, ops, expectedRevision) => okView(ns, {}, expectedRevision),
-    },
-  })
-  await applyWithFakeDocument(ctx, mod)
-
-  const controller = ctx.lastRegistered.inject().controller
-  const added = await controller.addServer('fixture', { command: 'node', args: ['server.mjs'] })
-  assert.equal(added, true)
-  assert.deepEqual(calls, [[
-    'remote.update',
-    'mcp',
-    {
-      mcpServers: {
-        fixture: normalizeServerConfig('fixture', { command: 'node', args: ['server.mjs'] }),
-      },
-    },
-    7,
-  ]])
-  assert.equal(describe.getSnapshot().view.revision, 8)
-  await controller.dispose()
-})
-
-test('apply falls back to connection.api.settings on 0.1.1-rc.2', async () => {
-  const mod = await loadClientModule()
-  const calls = []
-  const { ctx, describe } = fakeCtx({
-    generation: '0.1.1-rc.2',
-    calls,
-    views: {
-      update: (ns, patch, expectedRevision) => okView(ns, patch, expectedRevision),
-      mutate: (ns, ops, expectedRevision) => okView(ns, {}, expectedRevision),
-    },
-  })
-  await applyWithFakeDocument(ctx, mod)
-
-  const controller = ctx.lastRegistered.inject().controller
-  const added = await controller.addServer('fixture', { command: 'node', args: ['server.mjs'] })
-  assert.equal(added, true)
-  assert.equal(calls[0][0], 'api.update')
-  assert.equal(calls[0][1].ns, 'mcp')
-  assert.equal(calls[0][1].expectedRevision, 7)
-  assert.equal(describe.getSnapshot().view.revision, 8)
+  const row = describe
+    .getSnapshot()
+    .view.namespaces
+    .find((entry) => entry.ns === 'mcp-adapter')
+  assert.equal(row.revision, 8)
   await controller.dispose()
 })
 
 test('apply reports a failed remote write through the controller error', async () => {
   const mod = await loadClientModule()
   const { ctx } = fakeCtx({
-    generation: '0.1.2-rc.1',
     calls: [],
     views: {
       update: () => ({ ok: false, error: { code: 'conflict', message: 'revision moved' } }),
@@ -380,8 +350,9 @@ test('apply reports a failed remote write through the controller error', async (
 
 test('apply fails with guidance when no settings write face exists', async () => {
   const mod = await loadClientModule()
-  const { ctx } = fakeCtx({ generation: '0.1.1-rc.2', calls: [], views: {} })
-  delete ctx.connection.api
+  const { ctx } = fakeCtx({ calls: [], views: {} })
+  delete ctx.get
+  ctx.remote = {}
   // apply is synchronous: a missing write face throws before the loader ever
   // receives a plugin handle.
   assert.throws(() => mod.apply(ctx), /settings write API/)

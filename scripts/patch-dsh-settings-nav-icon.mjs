@@ -23,7 +23,7 @@ const SHELL_RELATIVE = join(
 )
 
 function parseArgs(argv) {
-  const options = { revert: false, icon: 'IconLinkOutline16', dshRoot: process.env.DSH_ROOT }
+  const options = { revert: false, icon: 'IconLinkOutlineMedium', dshRoot: process.env.DSH_ROOT }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--revert') options.revert = true
@@ -61,8 +61,10 @@ function locateShellFile(dshRoot) {
   process.exit(1)
 }
 
-/** The models branch, with every build-generated identifier captured. */
-const MODELS_BRANCH = /(\t+)if \(id === "models"\) return \(0, ([A-Za-z_$][\w$]*)\.jsx\)\(([A-Za-z_$][\w$]*)\.IconDataOutline16, \{\n\t+className: ([A-Za-z_$][\w$]*)\.navIcon,\n\t+size: 16\n\t+\}\);/
+/** The models branch, with every build-generated identifier captured. 0.1.7
+ * renamed the icon exports from `*16` to `*Medium` sizes, so only the `Icon`
+ * prefix is pinned. */
+const MODELS_BRANCH = /(\t+)if \(id === "models"\) return \(0, ([A-Za-z_$][\w$]*)\.jsx\)\(([A-Za-z_$][\w$]*)\.Icon\w+, \{\n\t+className: ([A-Za-z_$][\w$]*)\.navIcon,\n\t+size: 16\n\t+\}\);/
 
 function buildMcpBranch(indent, jsxRuntime, primitivesModule, cssModule, iconName) {
   return [

@@ -168,7 +168,7 @@ test('oauth actions call the RPC endpoints and surface the authorization URL', a
 test('secret metadata exposes keys while path operations preserve blank existing values', () => {
   const view = {
     namespaces: [{
-      ns: 'mcp',
+      ns: 'mcp-adapter',
       secrets: [
         { path: ['mcpServers', 'fixture', 'env', 'API_TOKEN'], set: true },
         { path: ['mcpServers', 'fixture', 'env', 'REMOVED'], set: false },
@@ -252,7 +252,7 @@ test('controller loads the workspace layer snapshot through the Connection RPC',
         result: {
           ok: true,
           value: {
-            ns: 'mcp',
+            ns: 'mcp-adapter',
             schema: {},
             value: {},
             applies: 'live',
@@ -346,7 +346,7 @@ test('controller writes through the current namespace revision and folds the ans
         result: {
           ok: true,
           value: {
-            ns: 'mcp',
+            ns: 'mcp-adapter',
             schema: {},
             value: payload.patch,
             applies: 'live',
@@ -418,7 +418,7 @@ test('the write path carries a top-level skillInstall mutation through untouched
           result: {
             ok: true,
             value: {
-              ns: 'mcp',
+              ns: 'mcp-adapter',
               schema: {},
               value: { mcpServers: {}, skillInstall: 'runtime' },
               applies: 'live',
@@ -490,4 +490,46 @@ test('loadOauthStatuses probes OAuth Servers defined only in the workspace layer
   const statusCalls = rpcCalls.filter(([endpoint]) => endpoint === 'oauth-status')
   assert.deepEqual(statusCalls, [['oauth-status', { server: 'workspaceOnly' }]])
   await controller.dispose()
+})
+
+test('a mirrored value the entry schema rejects reports an invalid settings state', () => {
+  const scope = {
+    getSnapshot: () => ({
+      status: 'loading',
+      value: undefined,
+      revision: 4,
+      writable: true,
+      mode: 'host',
+    }),
+    subscribe() {
+      return () => {}
+    },
+  }
+  const describe = {
+    getSnapshot: () => ({
+      status: 'ready',
+      view: {
+        writable: true,
+        hasDocument: true,
+        namespaces: [{ ns: 'mcp-adapter', schema: {}, value: { mcpServers: 5 }, revision: 4 }],
+      },
+      error: null,
+    }),
+    subscribe() {
+      return () => {}
+    },
+    async ensure() {},
+    acceptView() {},
+  }
+  const controller = new McpSettingsController({
+    scope,
+    describe,
+    settingsApi: {},
+    rpc: async () => ({ ok: true, value: { status: { servers: [] }, catalog: { servers: [] } } }),
+  })
+
+  const settings = controller.getSnapshot().settings
+  assert.equal(settings.status, 'invalid')
+  assert.match(settings.error.message, /failed validation/)
+  return controller.dispose()
 })

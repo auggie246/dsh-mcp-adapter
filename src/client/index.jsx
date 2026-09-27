@@ -7,18 +7,17 @@ import {
 import { createSettingsApi } from './settings-api.js'
 import { installMcpSettingsStyles } from './styles.js'
 
-// `remote` rides the 0.1.2-rc.1+ settings write surface (see settings-api.js);
-// it exists on every harness generation, while `connection.api` only on
-// 0.1.1-rc.2, so both stay declared and the resolution happens at apply time.
-// `remote.settings` deliberately stays UNDECLARED: on 0.1.2-rc.1 it is a
-// mounted dotted service read through the inject-free `ctx.get`, and
-// declaring it would park the plugin forever on 0.1.1-rc.2, where the
-// namespace is never mounted.
-export const inject = ['slots', 'settingsScope', 'connection', 'remote']
+// `remote` carries the settings write face (see settings-api.js); it exists on
+// every supported harness, while the mounted dotted `remote.settings`
+// namespace deliberately stays UNDECLARED — declaring it would park the
+// plugin on a profile that never mounts the remotes bundle. `configForms` is
+// the settings-domain base service: `get(entryId)` owns the per-entry read
+// mirror and write queue, `describe()` the shared document mirror.
+export const inject = ['slots', 'configForms', 'connection', 'remote']
 
 export function apply(ctx) {
-  const scope = ctx.settingsScope.bind({ namespace: MCP_SETTINGS_NAMESPACE })
-  const describe = ctx.settingsScope.describe()
+  const scope = ctx.configForms.get(MCP_SETTINGS_NAMESPACE)
+  const describe = ctx.configForms.describe()
   const controller = new McpSettingsController({
     scope,
     describe,

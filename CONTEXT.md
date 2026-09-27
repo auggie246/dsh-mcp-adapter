@@ -29,8 +29,12 @@ A per-server toggle that lets that server's tool calls run without asking the us
 _Avoid_: trust, bypass, whitelist
 
 **Config**:
-The standard `mcpServers`-shaped JSON stored in the adapter's DSH settings namespace, editable in Settings > MCP. Global: one list for every DSH session.
+The standard `mcpServers`-shaped JSON stored as the Adapter's profile Loader-entry Config (entry id `mcp-adapter`), editable in Settings > MCP. Global: one list for every DSH session.
 _Avoid_: manifest, registry file
+
+**Entry Config**:
+The DSH 0.1.7 configuration model: a plugin's `Config` schema validated by the cordis Loader into `ctx.config`, persisted in the profile composition. Fields marked volatile are edited live through the settings forms and commit into the running plugin without a restart.
+_Avoid_: settings namespace, settings document
 
 **Lazy Lifecycle**:
 The connection policy: a server connects on first use and disconnects after an idle timeout. Opposite of eager connect at startup.

@@ -1,34 +1,54 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { Context } from '@deepseek-ai/cordis'
-import { SettingsProvider, redactSecrets } from '@deepseek-ai/dsh-settings'
+import { redactSecrets } from '@deepseek-ai/dsh-settings'
 
 import * as Adapter from '../src/host/index.js'
 import {
+  createMcpConfigScope,
   MCP_SETTINGS_NAMESPACE,
-  McpSettingsSchema,
+  McpConfigSchema,
+  readMcpConfig,
   validateMcpSettings,
 } from '../src/host/settings.js'
 
+// The 0.1.7 Config model wraps every schema-declared volatile field in a
+// cosmokit reference; this mirrors what the Host reads from `ctx.config`.
 function resolve(value) {
-  const resolved = McpSettingsSchema(value)
-  validateMcpSettings(resolved)
-  return resolved
+  const resolved = McpConfigSchema(value)
+  const plain = {
+    ...resolved,
+    mcpServers: resolved.mcpServers.get(),
+    skillInstall: resolved.skillInstall.get(),
+  }
+  validateMcpSettings(plain)
+  return { mcpServers: plain.mcpServers, skillInstall: plain.skillInstall }
 }
 
-class MemorySettings extends SettingsProvider {
-  writable = true
-  document = {}
-
-  async load() {
-    return structuredClone(this.document)
+function fakeHostCtx(config, { settings } = {}) {
+  const handlers = new Map()
+  const warnings = []
+  const ctx = {
+    config,
+    logger: { warn: (message) => warnings.push(message) },
+    on(event, handler) {
+      handlers.set(event, handler)
+      return () => handlers.delete(event)
+    },
+    emit(event, ...args) {
+      handlers.get(event)?.(...args)
+    },
+    get: (name) => (name === 'settings' ? settings : undefined),
   }
-
-  async persist(ns, section) {
-    this.document[ns] = structuredClone(section)
-  }
+  return { ctx, warnings }
 }
+
+test('the plugin exports its Config schema with both managed fields volatile', () => {
+  assert.equal(Adapter.Config, McpConfigSchema)
+  assert.equal(McpConfigSchema.dict.mcpServers.meta.volatile, true)
+  assert.equal(McpConfigSchema.dict.skillInstall.meta.volatile, true)
+  assert.equal(MCP_SETTINGS_NAMESPACE, 'mcp-adapter')
+})
 
 test('resolves an absent Config to an empty server list and the default skill mode', () => {
   assert.deepEqual(resolve({}), { mcpServers: {}, skillInstall: 'file' })
@@ -125,7 +145,7 @@ test('rejects OAuth on stdio Servers and scopes without OAuth', () => {
 })
 
 test('redacts secret values while preserving their editable key paths', () => {
-  const config = resolve({
+  const config = {
     mcpServers: {
       stdio: { command: 'node', env: { API_TOKEN: 'secret' } },
       remote: {
@@ -133,8 +153,8 @@ test('redacts secret values while preserving their editable key paths', () => {
         headers: { Authorization: 'Bearer secret' },
       },
     },
-  })
-  const redacted = redactSecrets(McpSettingsSchema, config)
+  }
+  const redacted = redactSecrets(McpConfigSchema, config)
   assert.deepEqual(redacted.value.mcpServers.stdio.env, {})
   assert.deepEqual(redacted.value.mcpServers.remote.headers, {})
   assert.deepEqual(
@@ -218,43 +238,90 @@ test('accepts every lifecycle value and rejects invalid ones', () => {
   )
 })
 
-test('registers mcp, round-trips a valid update, and emits settings/updated', async () => {
-  const root = new Context()
-  const updates = []
-  root.on('settings/updated', (ns, next, prev, source) => {
-    updates.push({ ns, next, prev, source })
-  })
+test('readMcpConfig unwraps volatile refs and fail-closes on invalid sections', () => {
+  const valid = readMcpConfig(
+    McpConfigSchema({ mcpServers: { demo: { command: 'node' } }, skillInstall: 'runtime' }),
+  )
+  assert.equal(valid.mcpServers.demo.command, 'node')
+  assert.equal(valid.skillInstall, 'runtime')
 
-  try {
-    await root.plugin(MemorySettings)
-    await root.plugin(Adapter)
+  const invalid = []
+  const broken = readMcpConfig(
+    McpConfigSchema({ mcpServers: { broken: { command: 'node', url: 'https://x.test' } } }),
+    (message) => invalid.push(message),
+  )
+  assert.deepEqual(broken, { mcpServers: {}, skillInstall: 'file' })
+  assert.match(invalid.join('\n'), /configure exactly one transport/)
 
-    const settings = root.get('settings')
-    const initial = settings.describe().find(({ ns }) => ns === MCP_SETTINGS_NAMESPACE)
-    assert.ok(initial)
-    assert.deepEqual(initial.value, { mcpServers: {}, skillInstall: 'file' })
-    assert.equal(initial.applies, 'live')
+  // Unknown profile fields reject the section too, even though the read
+  // returns only declared fields.
+  assert.deepEqual(
+    readMcpConfig({ ...McpConfigSchema({}), imports: [] }, () => {}),
+    { mcpServers: {}, skillInstall: 'file' },
+  )
+})
 
-    await settings.update(MCP_SETTINGS_NAMESPACE, {
-      mcpServers: { demo: { command: 'node', args: ['server.js'] } },
-    })
+test('the scope serves unwrapped Config and watches committed volatile updates', () => {
+  const config = McpConfigSchema({ mcpServers: { demo: { command: 'node' } } })
+  const { ctx } = fakeHostCtx(config)
+  const scope = createMcpConfigScope(ctx)
 
-    const updated = settings.describe().find(({ ns }) => ns === MCP_SETTINGS_NAMESPACE)
-    assert.equal(updated.revision, 1)
-    assert.equal(updated.value.mcpServers.demo.command, 'node')
-    assert.deepEqual(settings.document.mcp.mcpServers.demo.args, ['server.js'])
-    assert.equal(updates.length, 1)
-    assert.equal(updates[0].ns, MCP_SETTINGS_NAMESPACE)
-    assert.equal(updates[0].source, 'update')
+  assert.deepEqual(scope.get().mcpServers.demo.command, 'node')
 
-    await assert.rejects(
-      settings.update(MCP_SETTINGS_NAMESPACE, {
-        mcpServers: { demo: { command: 'node', url: 'https://example.test' } },
-      }),
-      /configure exactly one transport/,
-    )
-    assert.equal(settings.describe().find(({ ns }) => ns === MCP_SETTINGS_NAMESPACE).revision, 1)
-  } finally {
-    await root.fiber.dispose()
+  const seen = []
+  scope.watch((next, previous) => seen.push([next, previous]))
+
+  // A committed volatile update replaces the fiber's references; the scope
+  // reports the changed value with its predecessor.
+  ctx.config = McpConfigSchema({ mcpServers: { demo: { command: 'node' }, new: { url: 'https://x.test/api' } } })
+  ctx.emit('loader/volatile-update', [['mcpServers']])
+  assert.equal(seen.length, 1)
+  assert.deepEqual(Object.keys(seen[0][0].mcpServers).sort(), ['demo', 'new'])
+  assert.deepEqual(Object.keys(seen[0][1].mcpServers), ['demo'])
+
+  // A volatile commit that changes nothing notifies nobody.
+  ctx.emit('loader/volatile-update', [['mcpServers']])
+  assert.equal(seen.length, 1)
+
+  scope.dispose()
+})
+
+test('scope writes land on the settings service under the entry id', async () => {
+  const calls = []
+  const settings = {
+    update: async (ns, patch) => calls.push(['update', ns, patch]),
+    mutate: async (ns, ops) => calls.push(['mutate', ns, ops]),
   }
+  const { ctx } = fakeHostCtx(McpConfigSchema({}), { settings })
+  const scope = createMcpConfigScope(ctx)
+
+  await scope.update({ mcpServers: { demo: { disabled: true } } })
+  await scope.mutate([{ op: 'unset', path: ['mcpServers', 'demo'] }])
+  assert.deepEqual(calls, [
+    ['update', 'mcp-adapter', { mcpServers: { demo: { disabled: true } } }],
+    ['mutate', 'mcp-adapter', [{ op: 'unset', path: ['mcpServers', 'demo'] }]],
+  ])
+  scope.dispose()
+})
+
+test('scope writes explain the missing settings service instead of crashing obscurely', () => {
+  const { ctx, warnings } = fakeHostCtx(McpConfigSchema({}))
+  const scope = createMcpConfigScope(ctx)
+  assert.throws(() => scope.update({ mcpServers: {} }), /settings service is not mounted/)
+  assert.deepEqual(warnings, [])
+  scope.dispose()
+})
+
+test('an invalid Config warns once and serves an empty server list', () => {
+  const config = McpConfigSchema({
+    mcpServers: { broken: { command: 'node', url: 'https://x.test/api' } },
+  })
+  const { ctx, warnings } = fakeHostCtx(config)
+  const scope = createMcpConfigScope(ctx)
+
+  assert.deepEqual(scope.get(), { mcpServers: {}, skillInstall: 'file' })
+  scope.get()
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /invalid MCP Config, serving no Servers/)
+  scope.dispose()
 })

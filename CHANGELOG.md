@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- One-time legacy import: after the Loader settles on DSH 0.1.7, a still-untouched `mcp-adapter` entry adopts the legacy `mcp:` section of the profile's `settings.yaml` (validated, then written through the settings service once, with a `mcp-adapter.legacy-imported` marker in the profile home so clearing every Server never resurrects the old list). Failures warn with manual copy instructions and never throw. `test/legacy-import.test.js`.
+
+### Changed
+
+- **Breaking: DSH 0.1.7 only.** The settings model the Adapter was built on is gone in 0.1.7 — `ctx.settings.register(namespace, schema)` was replaced by profile Loader-entry Config — and carrying the old generations alongside it would have meant two parallel settings subsystems, so support drops to DSH `0.1.7-rc.1` and newer (peer `@deepseek-ai/dsh-settings` `^0.1.7-rc.1`, `@deepseek-ai/schemastery` `^3.18.4`; stay on v0.3.x for older harnesses). The host half now exports `Config` with `mcpServers` and `skillInstall` marked volatile, reads live values off `ctx.config` (committed without a fiber restart via `loader/volatile-update`), and writes through `ctx.settings`; `createMcpConfigScope` keeps the `{ get, watch, update, mutate }` surface all consumers use. The settings namespace identity is the Loader entry id: `mcp-adapter` (was `mcp`). `src/host/index.js`, [ADR 0010](docs/adr/0010-loader-entry-config-model.md).
+- The client reads the entry through the `configForms` service (`configForms.get('mcp-adapter')` plus the shared `describe()` mirror) instead of the removed `settingsScope`; the `settings.section` page, the `remote.settings` positional wire, and its `{ ok, value | error }` envelope are unchanged. An entry whose mirrored value fails the schema now shows an explicit invalid state instead of a permanent spinner.
+- Cross-field validation moved from before-persist (the removed settings provider hook) to Host consumption: a Config section that passes schemastery but violates the transport rules serves no Servers with one deduplicated warning, so hand-edited profile Config cannot brick the manager.
+- `test/client-apply.test.js` collapses to a single 0.1.7 generation fake pinning the `mcp-adapter` entry id on the wire.
+
+### Removed
+
+- The DSH 0.1.1-rc.2 `connection.api.settings` client fallback, the 0.1.2/0.1.5 generation fakes, and the dead `@deepseek-ai/dsh-client-runtime` entry (last published for 0.1.1) from `dsh.client.inject`.
+- The `installMcpSettings` export (replaced by `createMcpConfigScope`); the nav-icon patch script now targets 0.1.7's renamed `*Medium` icon members with `IconLinkOutlineMedium` as the default.
+
 ## [v0.3.0] - 2026-09-13
 
 ### Changed

@@ -6,7 +6,7 @@
 
 DSH plugin connecting the agent to MCP servers through one mcp proxy tool and a Settings > MCP page.
 
-A [Deepseek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that mirrors the major features of [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter): one token-efficient `mcp` proxy tool over every configured server, optional per-tool promotion to native DSH tools, and configurable Server lifecycles (`lazy` by default). Servers are added and configured in the DSH web UI under **Settings > MCP**; configuration persists in the DSH settings document (`$DSH_HOME/settings.yaml`, namespace `mcp`).
+A [Deepseek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that mirrors the major features of [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter): one token-efficient `mcp` proxy tool over every configured server, optional per-tool promotion to native DSH tools, and configurable Server lifecycles (`lazy` by default). Servers are added and configured in the DSH web UI under **Settings > MCP**; configuration persists as the Adapter's DSH profile entry config (entry `mcp-adapter`).
 
 Vocabulary lives in [CONTEXT.md](./CONTEXT.md). Design decisions live in [docs/adr/](./docs/adr/). Work is tracked as [GitHub issues](https://github.com/auggie246/dsh-mcp-adapter/issues), and released changes are listed in [CHANGELOG.md](./CHANGELOG.md).
 
@@ -50,7 +50,7 @@ Vocabulary lives in [CONTEXT.md](./CONTEXT.md). Design decisions live in [docs/a
 
 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) established a workflow for driving many MCP servers from one agent: a single token-efficient proxy tool, lazy connections, and per-tool promotion. This plugin brings that workflow to [Deepseek Harness](https://github.com/deepseek-ai/deepseek-harness) natively.
 
-Server Config is stored in the Adapter's `mcp` namespace of the DSH settings service (persisted to `$DSH_HOME/settings.yaml`, hot-reloaded, revision-fenced) rather than pi-mcp-adapter's layered `.mcp.json` files, while still adopting the standard `mcpServers`-shaped JSON so configs paste over from pi, Claude Desktop, Cursor, or VS Code. See [ADR 0002](./docs/adr/0002-config-in-dsh-settings-namespace.md) for the reasoning. The v1 end-to-end verification lives in [docs/verification/v1-e2e.md](./docs/verification/v1-e2e.md).
+Server Config is stored as the Adapter's DSH Loader-entry Config (the `Config` schema the host module exports, persisted in the active profile composition, hot-reloaded through volatile updates, revision-fenced) rather than pi-mcp-adapter's layered `.mcp.json` files, while still adopting the standard `mcpServers`-shaped JSON so configs paste over from pi, Claude Desktop, Cursor, or VS Code. See [ADR 0010](./docs/adr/0010-loader-entry-config-model.md) for the reasoning. The v1 end-to-end verification lives in [docs/verification/v1-e2e.md](./docs/verification/v1-e2e.md).
 
 ## Install
 
@@ -66,11 +66,10 @@ Then restart DSH. The Settings panel (`⌘,` / sidebar foot) gains an **MCP** se
 
 | DSH release | Support |
 | --- | --- |
-| 0.1.2-rc.1 and newer 0.1.x | Supported. Settings writes go through the typed `remote.settings` face mounted by the `@deepseek-ai/dsh-api-remotes` client bundle. |
-| 0.1.1-rc.2 | Supported. The client falls back to the legacy `connection.api.settings` face when its module applies. |
-| Anything else | Unsupported. The client fails with an explicit "No DSH settings write API" error instead of a crash. |
+| 0.1.7-rc.1 and newer 0.1.x | Supported. Configuration is the plugin's Loader-entry Config: the Host reads `ctx.config` and live-committed volatile updates, writes go through the settings service, and the page reads the `configForms` service and writes through the `remote.settings` face mounted by the `@deepseek-ai/dsh-api-remotes` client bundle. |
+| Older 0.1.x | Unsupported. Those releases require the registered-namespace settings model this plugin used through v0.3.x; upgrade DSH or stay on that release line. |
 
-Both generations run the same host seam: the peer dependency accepts `@deepseek-ai/dsh-settings` `^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1`, and the Settings page, commands, and tools behave identically on either. The Adapter picks the right face when its client module applies. See [ADR 0009](./docs/adr/0009-dual-generation-settings-api.md).
+Upgrading from v0.3.x on DSH 0.1.7: at the first start after the upgrade, the Adapter imports the legacy `mcp:` section of the profile's `settings.yaml` into the `mcp-adapter` entry once. A `mcp-adapter.legacy-imported` marker records the import; anything the import refuses to accept (for example an invalid section) stays in `settings.yaml.imported` and a Host warning names the manual copy path. See [ADR 0010](./docs/adr/0010-loader-entry-config-model.md).
 
 ### Local development
 
@@ -113,37 +112,40 @@ The Host registers three human commands. A bare `/mcp` or `/mcp status` prints o
 
 ### Config
 
-The Host registers one live DSH settings namespace, `mcp`. Its user layer lives under `mcp:` in `$DSH_HOME/settings.yaml`; the Settings > MCP page owns normal edits.
+The Adapter's global Config is its DSH Loader-entry Config: the `Config` schema the host module exports, persisted in the active profile composition and validated when the entry loads. The Settings > MCP page owns normal edits; for manual edits the entry looks like this in the profile's patch layer:
 
 ```yaml
-mcp:
-  mcpServers:
-    filesystem:
-      command: npx
-      args: [-y, "@modelcontextprotocol/server-filesystem", /workspace]
-      autoAllow: false
-    hosted:
-      url: https://mcp.example.com/api
-      headers:
-        Authorization: Bearer example-token
-    github:
-      url: https://mcp.example.com/other
-      auth: oauth
-      scopes: [repo, read:org]
-  skillInstall: file
+# cordis.patch.yml — the mcp-adapter entry's config
+- id: mcp-adapter
+  name: "@auggieteo/dsh-mcp-adapter"
+  config:
+    mcpServers:
+      filesystem:
+        command: npx
+        args: [-y, "@modelcontextprotocol/server-filesystem", /workspace]
+        autoAllow: false
+      hosted:
+        url: https://mcp.example.com/api
+        headers:
+          Authorization: Bearer example-token
+      github:
+        url: https://mcp.example.com/other
+        auth: oauth
+        scopes: [repo, read:org]
+    skillInstall: file
 ```
 
 Each Server configures exactly one Transport: `command` for stdio, or `url` for streamable HTTP with SSE fallback. Adapter extension fields are `auth` (`headers` by default, or `oauth` for HTTP Servers), `scopes` (OAuth scopes, requires `auth: oauth`), `disabled`, `autoAllow`, `lifecycle` (`lazy`, `eager`, `keep-alive`, or `lazy-keep-alive`; default `lazy`), `idleTimeoutMinutes` (default `10`), and `promotedTools`.
 
 The one top-level Adapter field is `skillInstall` (`file` by default, `runtime`, or `off`); see [Agent skill](#agent-skill).
 
-The schema rejects unknown fields and invalid transport combinations before they reach `$DSH_HOME/settings.yaml`. Each `env` and `headers` value has the DSH `secret` schema role. Wire views retain each key and redact its value.
+Schemastery validates the shape when the entry loads, and the Adapter enforces the full rule set — unknown fields, transport exclusivity, scope and lifecycle sanity — every time it serves the Config: a section that fails validation serves no Servers with one Host warning, never a partially applied or bricked configuration. Each `env` and `headers` value has the DSH `secret` schema role. Wire views retain each key and redact its value.
 
 #### Workspace Config layer
 
-The Host also reads `.dsh/mcp.json` under its workspace root and merges it over the global namespace at resolve time. A workspace Server entry with the same name replaces the global entry wholesale; workspace-only names are added; global-only names pass through. Disable or override a Server from the workspace by defining it there with `disabled: true`.
+The Host also reads `.dsh/mcp.json` under its workspace root and merges it over the global entry Config at resolve time. A workspace Server entry with the same name replaces the global entry wholesale; workspace-only names are added; global-only names pass through. Disable or override a Server from the workspace by defining it there with `disabled: true`.
 
-The workspace file uses the same `mcpServers` shape and validation as the global Config. Unknown top-level keys (only `mcpServers` is allowed) or an invalid Server entry reject the whole layer, which fails closed to the global-only Config with a Host warning; a missing file is an empty layer. Values are never environment-variable-interpolated. The Adapter never writes the workspace file: page edits, imports, and API writes all stay on the global namespace, which the workspace file overrides. See [ADR 0005](./docs/adr/0005-per-workspace-config.md).
+The workspace file uses the same `mcpServers` shape and validation as the global Config. Unknown top-level keys (only `mcpServers` is allowed) or an invalid Server entry reject the whole layer, which fails closed to the global-only Config with a Host warning; a missing file is an empty layer. Values are never environment-variable-interpolated. The Adapter never writes the workspace file: page edits, imports, and API writes all stay on the global entry Config, which the workspace file overrides. See [ADR 0005](./docs/adr/0005-per-workspace-config.md).
 
 ### Settings page
 
@@ -153,7 +155,7 @@ Servers whose Config comes from the workspace `.dsh/mcp.json` show a `workspace`
 
 JSON import accepts the standard `{ "mcpServers": { ... } }` shape. Import replaces matching Server entries and preserves Servers absent from the import.
 
-Every page write carries the latest namespace revision. Field edits use path mutations.
+Every page write carries the latest entry revision. Field edits use path mutations.
 
 ### Server lifecycle
 
@@ -224,7 +226,7 @@ The installed file is never overwritten. If `$DSH_HOME/skills/mcp-adapter/SKILL.
 
 ## Architecture
 
-The package ships two faces. The host half (`src/host/`) is plain ESM with no build step; it registers the settings namespace, the manager, the proxy tool, promotions, commands, OAuth services, and the bundled skill. The client half (`src/client/`) is JSX bundled by esbuild (`build.mjs`) into `lib/client.js`, a loader-compatible bundle shaped for `window.__ModuleLoader__.load`. The client declares its service dependencies through `package.json`'s `dsh.client.inject`; `cordis.patch.yml` inserts the host composition row on install.
+The package ships two faces. The host half (`src/host/`) is plain ESM with no build step; it exports the Loader-entry `Config` schema and installs the manager, the proxy tool, promotions, commands, OAuth services, and the bundled skill. The client half (`src/client/`) is JSX bundled by esbuild (`build.mjs`) into `lib/client.js`, a loader-compatible bundle shaped for `window.__ModuleLoader__.load`. The client declares its service dependencies through `package.json`'s `dsh.client.inject`; `cordis.patch.yml` inserts the host composition row on install.
 
 The host exposes one Connection RPC channel, `/mcp-adapter`, with endpoints `status`, `catalog`, `overview`, `layers`, `reconnect`, `oauth-status`, `oauth-login`, and `oauth-logout`. The Settings page polls `overview` and `layers` for detached snapshots (a `layers` refresh also re-reads the workspace layer); `reconnect` restarts one named Server; the OAuth endpoints drive and report the per-Server sign-in state.
 
@@ -269,7 +271,7 @@ CHANGELOG.md       released changes
 
 Feel free to dive in! [Open an issue](https://github.com/auggie246/dsh-mcp-adapter/issues/new) or submit PRs; questions go through the issue tracker.
 
-- Run `pnpm test` before submitting. The suite covers the host, the client settings controller, and the dual-generation settings faces (`test/client-apply.test.js`).
+- Run `pnpm test` before submitting. The suite covers the host, the client settings controller, the 0.1.7 entry-config wire (`test/client-apply.test.js`), and the legacy `settings.yaml` import (`test/legacy-import.test.js`).
 - New project vocabulary belongs in [CONTEXT.md](./CONTEXT.md); design decisions get an [ADR](./docs/adr/) before or with the change.
 
 ## License

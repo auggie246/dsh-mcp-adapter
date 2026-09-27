@@ -1,5 +1,13 @@
-export const MCP_SETTINGS_NAMESPACE = 'mcp'
+// 0.1.7 settings namespaces are profile Loader entry ids; `mcp-adapter` is the
+// id cordis.patch.yml registers for this plugin.
+export const MCP_SETTINGS_NAMESPACE = 'mcp-adapter'
 export const MCP_RPC_CHANNEL = '/mcp-adapter'
+
+// The configForms controller validates every mirrored namespace value against
+// the entry schema and simply never reaches `ready` when validation fails;
+// surface that state instead of spinning forever.
+const INVALID_SETTINGS_MESSAGE =
+  'The saved MCP configuration failed validation. Fix or remove the invalid fields in the profile, then reopen Settings.'
 
 const SERVER_FIELDS = new Set([
   'command',
@@ -229,6 +237,18 @@ function overviewEmpty() {
 }
 
 /**
+ * A form whose mirrored namespace holds a value the entry schema rejects stays
+ * `loading` forever by contract, so report it as `invalid` with the message
+ * the Settings page renders for non-ready states.
+ */
+function projectSettingsStatus(settings, document) {
+  if (settings.status !== 'loading') return settings
+  const row = document.view?.namespaces?.find((entry) => entry.ns === MCP_SETTINGS_NAMESPACE)
+  if (row === undefined || row.value === undefined) return settings
+  return { ...settings, status: 'invalid', error: { message: INVALID_SETTINGS_MESSAGE } }
+}
+
+/**
  * Resolve the Config source of one Server from the workspace layer snapshot
  * delivered by the `layers` Connection RPC endpoint. Without a snapshot —
  * for example an older Host — every Server reads as global.
@@ -275,9 +295,10 @@ export class McpSettingsController {
   }
 
   projection() {
+    const settingsDocument = this.describe.getSnapshot()
     return {
-      settings: this.scope.getSnapshot(),
-      settingsDocument: this.describe.getSnapshot(),
+      settings: projectSettingsStatus(this.scope.getSnapshot(), settingsDocument),
+      settingsDocument,
       overview: this.overview,
       layers: this.layers,
       oauthStatuses: this.oauthStatuses,

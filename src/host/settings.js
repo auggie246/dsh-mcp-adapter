@@ -1,10 +1,11 @@
 import z from '@deepseek-ai/schemastery'
 
-// The plain namespace string works on both supported harness generations:
-// DSH 0.1.1-rc.2 brands it via the (removed-in-0.1.2-rc.1) `settingsNamespace`
-// export, while 0.1.2-rc.1 validates the raw string inside `register` itself.
-// Branding was type-only, so no runtime behavior changes either way.
-export const MCP_SETTINGS_NAMESPACE = 'mcp'
+import { errorMessage } from './errors.js'
+
+// DSH 0.1.7 replaced the registered-namespace settings model with profile
+// Loader-entry Config: the Adapter's configuration IS its entry Config, so
+// the settings namespace identity is the entry id from cordis.patch.yml.
+export const MCP_SETTINGS_NAMESPACE = 'mcp-adapter'
 
 const optionalString = () => z.string().required(false)
 
@@ -64,14 +65,21 @@ export const McpServerSchema = z
   })
   .description('One configured MCP server.')
 
-export const McpSettingsSchema = z.object({
+// Every Adapter-managed field is volatile: the Loader commits form edits into
+// the running fiber without a restart, and the Settings page / profile editor
+// may only write schema-declared volatile paths. Volatile fields must sit at
+// fixed object paths, so the marks stay on the two top-level fields — server
+// entries inside the dict cannot carry their own volatile marks.
+export const McpConfigSchema = z.object({
   mcpServers: z
     .dict(McpServerSchema)
     .default({})
+    .volatile()
     .description('Global MCP servers, keyed by their unique server name.'),
   skillInstall: z
     .union(['file', 'runtime', 'off'])
     .default('file')
+    .volatile()
     .description(
       'How the bundled mcp-adapter agent skill is installed: file (copy to '
       + '$DSH_HOME/skills/mcp-adapter/ so Settings > Skills lists it; an '
@@ -109,7 +117,9 @@ function rejectUnknownKeys(value, allowed, path) {
 
 /**
  * Cross-field checks that the serializable Schemastery shape cannot express.
- * SettingsProvider runs this after schema validation and before every persist.
+ * The old SettingsProvider ran this before every persist; the 0.1.7 Config
+ * write path validates only the schema, so this runs at Host consumption
+ * instead (the Adapter serves no Servers for a semantically invalid section).
  */
 export function validateMcpSettings(value) {
   rejectUnknownKeys(value, TOP_LEVEL_KEYS, 'mcp')
@@ -181,18 +191,112 @@ export function validateMcpSettings(value) {
   }
 }
 
+// Cosmokit identifies volatile references across library copies through this
+// shared symbol; reading it directly keeps the Host free of a cosmokit import.
+const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
+
+function unwrapVolatile(value, fallback) {
+  if (typeof value === 'object' && value !== null && VOLATILE_WRITE in value) {
+    return value.get()
+  }
+  return value ?? fallback
+}
+
+export function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined'
+  const keys = Object.keys(value).sort()
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`
+}
+
 /**
- * Register Config while the optional Host settings service exists. The scope
- * belongs to the injected fiber, so provider reload or Adapter disposal removes
- * the namespace and every watcher cleanly.
+ * Read the live Adapter Config from the fiber and enforce the cross-field
+ * rules. A section that schemastery accepts but these rules reject fails
+ * closed to an empty server list with one deduplicated warning, so a
+ * hand-edited profile can never brick the connection manager.
  */
-export function installMcpSettings(ctx, activate) {
-  ctx.inject(['settings'], (settingsCtx) => {
-    const scope = settingsCtx.settings.register(
-      MCP_SETTINGS_NAMESPACE,
-      McpSettingsSchema,
-      { validate: validateMcpSettings },
-    )
-    return activate?.(settingsCtx, scope)
+export function readMcpConfig(config = {}, onInvalid) {
+  const value = {
+    ...config,
+    mcpServers: unwrapVolatile(config.mcpServers, {}),
+    skillInstall: unwrapVolatile(config.skillInstall, 'file'),
+  }
+  try {
+    // Validation sees the whole resolved Config, so unknown fields still
+    // reject the section; the returned value only carries declared fields.
+    validateMcpSettings(value)
+    return { mcpServers: value.mcpServers, skillInstall: value.skillInstall }
+  } catch (error) {
+    onInvalid?.(errorMessage(error))
+    return { mcpServers: {}, skillInstall: 'file' }
+  }
+}
+
+/**
+ * Wrap the fiber's volatile entry Config in the scope surface every Adapter
+ * feature consumes (the same { get, watch, update, mutate } the old settings
+ * scope provided):
+ *  - `get()` unwraps the volatile references and fail-closes on invalid data;
+ *  - `watch(listener)` fires `(next, previous)` after committed volatile
+ *    updates (`loader/volatile-update`) whose value actually changed;
+ *  - `update(patch)` / `mutate(ops)` write through the settings service onto
+ *    this entry and throw when no settings service is mounted.
+ */
+export function createMcpConfigScope(ctx, options = {}) {
+  const warn = options.warn ?? ((message) => ctx.logger?.warn?.(message))
+  const settingsService = options.settings ?? (() => ctx.get('settings'))
+  const listeners = new Set()
+  let warnedInvalid
+  let last = readCurrent()
+
+  function readCurrent() {
+    return readMcpConfig(ctx.config, (message) => {
+      if (message === warnedInvalid) return
+      warnedInvalid = message
+      warn(`dsh-mcp-adapter: invalid MCP Config, serving no Servers: ${message}`)
+    })
+  }
+
+  const off = ctx.on('loader/volatile-update', () => {
+    const next = readCurrent()
+    if (stableJson(next) === stableJson(last)) return
+    const previous = last
+    last = next
+    for (const listener of [...listeners]) {
+      try {
+        listener(next, previous)
+      } catch {
+        // A stale or failing listener must not break Config notification.
+      }
+    }
   })
+
+  function requireSettings(method) {
+    const settings = settingsService()
+    if (settings === undefined) {
+      throw new Error(
+        `dsh-mcp-adapter: settings ${method} unavailable: the DSH settings service is not `
+        + 'mounted in this profile, so MCP Config cannot be written.',
+      )
+    }
+    return settings
+  }
+
+  return {
+    get: () => readCurrent(),
+    watch(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    update(patch) {
+      return requireSettings('update').update(MCP_SETTINGS_NAMESPACE, patch)
+    },
+    mutate(ops) {
+      return requireSettings('mutate').mutate(MCP_SETTINGS_NAMESPACE, ops)
+    },
+    dispose() {
+      off?.()
+      listeners.clear()
+    },
+  }
 }

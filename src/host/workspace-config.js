@@ -2,7 +2,7 @@ import { watch as fsWatch } from 'node:fs'
 import { readFile as fsReadFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { McpServerSchema, validateMcpSettings } from './settings.js'
+import { McpServerSchema, stableJson, validateMcpSettings } from './settings.js'
 import { errorMessage } from './errors.js'
 
 function isRecord(value) {
@@ -95,13 +95,6 @@ export function mergeMcpConfigs(globalServers, workspaceServers) {
   return { servers, sources }
 }
 
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined'
-  const keys = Object.keys(value).sort()
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`
-}
-
 function defaultWatchDirectory(directory, onChange) {
   const watcher = fsWatch(directory, () => onChange())
   watcher.on('error', () => {
@@ -120,7 +113,7 @@ function publicServerSummary(config) {
 }
 
 /**
- * Wrap the registered global Config scope with the workspace layer.
+ * Wrap the entry Config scope with the workspace layer.
  *
  * `get()` returns the merged namespace value and `layerSnapshot()` reports
  * which source each Server came from. Watch listeners see global Config edits
@@ -287,7 +280,7 @@ export function createLayeredScope(globalScope, options = {}) {
 }
 
 /**
- * Register the workspace Config layer on the settings fiber. Disposing the
+ * Register the workspace Config layer on the Adapter fiber. Disposing the
  * fiber stops the global watch and the best-effort `.dsh` directory watch.
  */
 export function installWorkspaceLayer(ctx, scope, options = {}) {
