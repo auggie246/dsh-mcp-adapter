@@ -157,6 +157,8 @@ JSON import accepts the standard `{ "mcpServers": { ... } }` shape. Import repla
 
 Every page write carries the latest entry revision. Field edits use path mutations.
 
+The status surface talks to the Host through exact Fetch routes on the shared `/api` channel (`POST /api/mcp-adapter/<endpoint>`), authenticated by the platform like every other `/api` request ([ADR 0011](./docs/adr/0011-rpc-on-shared-api-fetch-routes.md)). If the page instead shows `Could not load MCP status: … HTTP 405`, the installed Adapter predates v0.4.2: its dedicated RPC channel cannot mount on DSH 0.1.7. Upgrade and restart DSH.
+
 ### Server lifecycle
 
 Each Server's `lifecycle` setting controls when it connects and whether it idles out. `lazy` remains the default.
@@ -253,6 +255,7 @@ src/host/          host half: plain ESM, no build step
 src/client/        client half: JSX, bundled to lib/client.js
 build.mjs          esbuild wrapper producing the loader-compatible bundle
 lib/client.js      build artifact (gitignored), required at runtime
+scripts/           CLI over the Settings nav-icon patch core
 docs/adr/          architecture decisions
 docs/verification/ end-to-end verification records
 CONTEXT.md         project vocabulary

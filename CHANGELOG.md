@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.4.2] - 2026-09-28
+
+### Fixed
+
+- Settings > MCP loads again on DSH 0.1.7 instead of showing `Could not load MCP status: transport failure for /mcp-adapter/overview: HTTP 405`. The status RPC was a dedicated `connection.rpc.handle('/mcp-adapter', …)` channel, but DSH 0.1.7 mounts such channels with `owner.webServer.register` on the connection provider's own fiber, and cordis 4 refuses that un-injected property read — the channel silently never registered and the SPA static fallback answered every POST with 405 (the `mcp-adapter` plugin row still reads `active`; only a Host console line shows the failure). The RPC surface now mounts each endpoint as an exact Fetch route on the shared `/api` channel through the documented `connection.fetch.register` seam — the platform still applies browser authentication and the origin fence before the handler runs — and the Client calls `connection.rpc.call('/api', 'mcp-adapter/<endpoint>')`; envelopes and the page are otherwise unchanged. `test/rpc-fetch-routes.test.js` pins the mount and the dispose/remount lifecycle through a real cordis fiber, which the old `rpc.handle` fakes could not see. [ADR 0011](docs/adr/0011-rpc-on-shared-api-fetch-routes.md).
+
 ## [v0.4.1] - 2026-09-28
 
 ### Fixed

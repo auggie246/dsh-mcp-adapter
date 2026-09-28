@@ -1,6 +1,7 @@
 import { McpSettingsPage } from './McpSettingsPage.jsx'
 import {
   MCP_RPC_CHANNEL,
+  MCP_RPC_ENDPOINT_PREFIX,
   MCP_SETTINGS_NAMESPACE,
   McpSettingsController,
 } from './settings-controller.js'
@@ -23,7 +24,12 @@ export function apply(ctx) {
     describe,
     settingsApi: createSettingsApi(ctx),
     rpc: (endpoint, payload, signal) =>
-      ctx.connection.rpc.call(MCP_RPC_CHANNEL, endpoint, payload, signal),
+      ctx.connection.rpc.call(
+        MCP_RPC_CHANNEL,
+        `${MCP_RPC_ENDPOINT_PREFIX}${endpoint}`,
+        payload,
+        signal,
+      ),
   })
 
   ctx.effect(() => installMcpSettingsStyles(), 'mcp-adapter: Settings styles')

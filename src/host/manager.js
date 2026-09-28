@@ -567,7 +567,64 @@ export class McpClientManager {
   }
 }
 
-export const MCP_RPC_CHANNEL = '/mcp-adapter'
+// The Adapter's Settings RPC rides the shared `/api` channel as exact Fetch
+// routes, not as a dedicated `connection.rpc.handle` channel. DSH 0.1.7
+// mounts `rpc.handle` prefixes with `owner.webServer.register` on the
+// connection provider's own fiber, and cordis 4 refuses that un-injected
+// property read — the channel silently never mounts and the SPA fallback
+// answers its POSTs with HTTP 405. See ADR 0011.
+export const MCP_RPC_ENDPOINT_PREFIX = 'mcp-adapter/'
+export const MCP_RPC_ROUTE_PREFIX = `/api/${MCP_RPC_ENDPOINT_PREFIX}`
+export const MCP_RPC_ENDPOINTS = Object.freeze([
+  'status',
+  'catalog',
+  'overview',
+  'layers',
+  'oauth-login',
+  'oauth-logout',
+  'oauth-status',
+  'reconnect',
+])
+
+// Speaks the connection envelope on one exact route so the Client's
+// `connection.rpc.call('/api', 'mcp-adapter/<endpoint>')` validates the
+// reply exactly as it does for platform endpoints: `client-request` in,
+// `server-response` out with the same `rpcId`.
+function createMcpRpcFetchHandler(endpoint, dispatch) {
+  const method = `${MCP_RPC_ENDPOINT_PREFIX}${endpoint}`
+  return async (request) => {
+    let message
+    try {
+      message = await request.json()
+    } catch {
+      return new Response('MCP Adapter RPC bodies must be JSON', { status: 400 })
+    }
+    if (
+      typeof message !== 'object' ||
+      message === null ||
+      message.type !== 'client-request' ||
+      typeof message.rpcId !== 'string'
+    ) {
+      return new Response('MCP Adapter RPC bodies must be client-request messages', { status: 400 })
+    }
+    if (message.method !== method) {
+      return Response.json({
+        type: 'server-response',
+        rpcId: message.rpcId,
+        result: {
+          ok: false,
+          error: {
+            code: 'bad-request',
+            message: `method ${JSON.stringify(message.method)} does not match the ${JSON.stringify(method)} endpoint`,
+            details: { issues: [] },
+          },
+        },
+      })
+    }
+    const result = await dispatch(endpoint, message.payload, request.signal)
+    return Response.json({ type: 'server-response', rpcId: message.rpcId, result })
+  }
+}
 
 export function installMcpManagerRpc(ctx, manager, options = {}) {
   const layerSnapshot = options.layerSnapshot
@@ -577,16 +634,105 @@ export function installMcpManagerRpc(ctx, manager, options = {}) {
   // failure uses `internal` with empty `details`. A custom code passes the
   // host, but the Client rejects the whole result with a schema error and the
   // real message never reaches the UI.
-  ctx.connection.rpc.handle(
-    MCP_RPC_CHANNEL,
-    async (endpoint, payload, signal) => {
-      if (endpoint === 'status') {
-        return { ok: true, value: manager.statusSnapshot() }
+  const dispatch = async (endpoint, payload, signal) => {
+    if (endpoint === 'status') {
+      return { ok: true, value: manager.statusSnapshot() }
+    }
+    if (endpoint === 'catalog') {
+      return { ok: true, value: manager.catalogSnapshot() }
+    }
+    if (endpoint === 'overview') {
+      return {
+        ok: true,
+        value: {
+          status: manager.statusSnapshot(),
+          catalog: manager.catalogSnapshot(),
+        },
       }
-      if (endpoint === 'catalog') {
-        return { ok: true, value: manager.catalogSnapshot() }
+    }
+    if (endpoint === 'layers') {
+      if (typeof layerSnapshot !== 'function') {
+        return {
+          ok: false,
+          error: {
+            code: 'bad-request',
+            message: 'The MCP workspace layer snapshot is unavailable.',
+            details: { issues: [] },
+          },
+        }
       }
-      if (endpoint === 'overview') {
+      // The snapshot may be async (the wiring refreshes the workspace layer
+      // first, which gives the layers poll a real refresh path).
+      return { ok: true, value: await layerSnapshot() }
+    }
+    if (endpoint === 'oauth-login' || endpoint === 'oauth-logout' || endpoint === 'oauth-status') {
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        Array.isArray(payload) ||
+        typeof payload.server !== 'string' ||
+        payload.server.trim() === ''
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: 'bad-request',
+            message: 'OAuth endpoints require a non-empty Server name.',
+            details: { issues: [] },
+          },
+        }
+      }
+      if (oauth === undefined) {
+        return {
+          ok: false,
+          error: {
+            code: 'internal',
+            message: 'OAuth support is not available on this Adapter',
+            details: {},
+          },
+        }
+      }
+      const serverName = payload.server.trim()
+      try {
+        if (endpoint === 'oauth-login') {
+          return { ok: true, value: await oauth.startLogin(serverName) }
+        }
+        if (endpoint === 'oauth-logout') {
+          return { ok: true, value: await oauth.logout(serverName) }
+        }
+        return { ok: true, value: await oauth.status(serverName) }
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: 'internal',
+            message: errorMessage(error),
+            details: {},
+          },
+        }
+      }
+    }
+    if (endpoint === 'reconnect') {
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        Array.isArray(payload) ||
+        typeof payload.server !== 'string' ||
+        payload.server.trim() === ''
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: 'bad-request',
+            message: 'Reconnect requires a non-empty Server name.',
+            details: { issues: [] },
+          },
+        }
+      }
+      const serverName = payload.server.trim()
+      try {
+        await manager.disconnect(serverName, 'manual reconnect')
+        await manager.listTools(serverName, { signal })
         return {
           ok: true,
           value: {
@@ -594,119 +740,42 @@ export function installMcpManagerRpc(ctx, manager, options = {}) {
             catalog: manager.catalogSnapshot(),
           },
         }
-      }
-      if (endpoint === 'layers') {
-        if (typeof layerSnapshot !== 'function') {
-          return {
-            ok: false,
-            error: {
-              code: 'bad-request',
-              message: 'The MCP workspace layer snapshot is unavailable.',
-              details: { issues: [] },
-            },
-          }
-        }
-        // The snapshot may be async (the wiring refreshes the workspace layer
-        // first, which gives the layers poll a real refresh path).
-        return { ok: true, value: await layerSnapshot() }
-      }
-      if (endpoint === 'oauth-login' || endpoint === 'oauth-logout' || endpoint === 'oauth-status') {
-        if (
-          typeof payload !== 'object' ||
-          payload === null ||
-          Array.isArray(payload) ||
-          typeof payload.server !== 'string' ||
-          payload.server.trim() === ''
-        ) {
-          return {
-            ok: false,
-            error: {
-              code: 'bad-request',
-              message: 'OAuth endpoints require a non-empty Server name.',
-              details: { issues: [] },
-            },
-          }
-        }
-        if (oauth === undefined) {
-          return {
-            ok: false,
-            error: {
-              code: 'internal',
-              message: 'OAuth support is not available on this Adapter',
-              details: {},
-            },
-          }
-        }
-        const serverName = payload.server.trim()
-        try {
-          if (endpoint === 'oauth-login') {
-            return { ok: true, value: await oauth.startLogin(serverName) }
-          }
-          if (endpoint === 'oauth-logout') {
-            return { ok: true, value: await oauth.logout(serverName) }
-          }
-          return { ok: true, value: await oauth.status(serverName) }
-        } catch (error) {
-          return {
-            ok: false,
-            error: {
-              code: 'internal',
-              message: errorMessage(error),
-              details: {},
-            },
-          }
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: 'internal',
+            message: errorMessage(error),
+            details: {},
+          },
         }
       }
-      if (endpoint === 'reconnect') {
-        if (
-          typeof payload !== 'object' ||
-          payload === null ||
-          Array.isArray(payload) ||
-          typeof payload.server !== 'string' ||
-          payload.server.trim() === ''
-        ) {
-          return {
-            ok: false,
-            error: {
-              code: 'bad-request',
-              message: 'Reconnect requires a non-empty Server name.',
-              details: { issues: [] },
-            },
-          }
-        }
-        const serverName = payload.server.trim()
-        try {
-          await manager.disconnect(serverName, 'manual reconnect')
-          await manager.listTools(serverName, { signal })
-          return {
-            ok: true,
-            value: {
-              status: manager.statusSnapshot(),
-              catalog: manager.catalogSnapshot(),
-            },
-          }
-        } catch (error) {
-          return {
-            ok: false,
-            error: {
-              code: 'internal',
-              message: errorMessage(error),
-              details: {},
-            },
-          }
-        }
+    }
+    return {
+      ok: false,
+      error: {
+        code: 'bad-request',
+        message: `Unknown MCP Adapter endpoint ${JSON.stringify(endpoint)}`,
+        details: { issues: [] },
+      },
+    }
+  }
+  // One effect per route: a partial registration failure rolls the earlier
+  // routes back with the fiber, and an entry restart disposes every route
+  // before the next activation re-registers it.
+  for (const endpoint of MCP_RPC_ENDPOINTS) {
+    ctx.effect(() => {
+      const dispose = ctx.connection.fetch.register({
+        path: `${MCP_RPC_ROUTE_PREFIX}${endpoint}`,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: createMcpRpcFetchHandler(endpoint, dispatch),
+      })
+      return async () => {
+        await dispose()
       }
-      return {
-        ok: false,
-        error: {
-          code: 'bad-request',
-          message: `Unknown MCP Adapter endpoint ${JSON.stringify(endpoint)}`,
-          details: { issues: [] },
-        },
-      }
-    },
-    { authority: 'trusted-host' },
-  )
+    }, `dsh-mcp-adapter: RPC ${endpoint} route`)
+  }
 }
 
 export function installMcpManager(ctx, settingsScope, options = {}) {

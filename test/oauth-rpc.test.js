@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { MCP_RPC_CHANNEL } from '../src/host/manager.js'
+import { MCP_RPC_ROUTE_PREFIX } from '../src/host/manager.js'
 import { installMcpManagerRpc } from '../src/host/manager.js'
 import { installMcpOauth } from '../src/host/oauth-service.js'
 
@@ -35,12 +35,22 @@ class Scope {
 }
 
 function createRpcHarness({ oauth }) {
-  let registration
+  const routes = new Map()
   const ctx = {
+    effect(setup) {
+      setup()
+      return () => {}
+    },
     connection: {
-      rpc: {
-        handle(channel, handler, options) {
-          registration = { channel, handler, options }
+      fetch: {
+        register(route) {
+          if (routes.has(route.path)) {
+            throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} is already registered`)
+          }
+          routes.set(route.path, route)
+          return async () => {
+            routes.delete(route.path)
+          }
         },
       },
     },
@@ -57,7 +67,29 @@ function createRpcHarness({ oauth }) {
     },
   }
   installMcpManagerRpc(ctx, manager, oauth === undefined ? {} : { oauth })
-  return { handler: registration.handler, manager, channel: registration.channel }
+  // Drives the connection envelope through one route, like the shared /api
+  // handler does, and returns the decoded result.
+  const call = async (endpoint, payload) => {
+    const route = routes.get(`${MCP_RPC_ROUTE_PREFIX}${endpoint}`)
+    assert.ok(route !== undefined, `no route registered for ${endpoint}`)
+    const response = await route.fetch(
+      new Request(`http://mcp.test${route.path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: 'rpc-1',
+          method: `mcp-adapter/${endpoint}`,
+          payload,
+        }),
+      }),
+    )
+    assert.equal(response.status, 200)
+    const envelope = await response.json()
+    assert.equal(envelope.rpcId, 'rpc-1')
+    return envelope.result
+  }
+  return { call, manager, routes }
 }
 
 function controllerHarness({ servers, store }) {
@@ -76,20 +108,21 @@ function controllerHarness({ servers, store }) {
   return { oauth, manager, warnings }
 }
 
-test('rpc channel and option wiring stay unchanged without oauth', async () => {
-  const { handler, channel } = createRpcHarness({ oauth: undefined })
-  assert.equal(channel, MCP_RPC_CHANNEL)
-  assert.equal((await handler('status')).ok, true)
-  const missingOauth = await handler('oauth-status', { server: 'remote' })
+test('rpc routes mount on the shared api channel and answer oauth endpoints without oauth', async () => {
+  const { call, routes } = createRpcHarness({ oauth: undefined })
+  assert.ok(routes.has(`${MCP_RPC_ROUTE_PREFIX}status`))
+  assert.ok(routes.has(`${MCP_RPC_ROUTE_PREFIX}oauth-status`))
+  assert.equal((await call('status')).ok, true)
+  const missingOauth = await call('oauth-status', { server: 'remote' })
   assert.equal(missingOauth.ok, false)
   assert.equal(missingOauth.error.code, 'internal')
   assert.deepEqual(missingOauth.error.details, {})
 })
 
 test('oauth endpoints reject bad payloads with the bad-request shape', async () => {
-  const { handler } = createRpcHarness({ oauth: {} })
+  const { call } = createRpcHarness({ oauth: {} })
   for (const payload of [undefined, {}, { server: '' }, { server: 5 }]) {
-    const result = await handler('oauth-status', payload)
+    const result = await call('oauth-status', payload)
     assert.equal(result.ok, false)
     assert.equal(result.error.code, 'bad-request')
     assert.match(result.error.message, /non-empty Server name/)
@@ -103,9 +136,9 @@ test('oauth-status reports configured, signedIn, and expiresAt without token mat
     servers: { remote: { url: 'https://a.test/api', auth: 'oauth', disabled: false } },
     store,
   })
-  const { handler } = createRpcHarness({ oauth })
+  const { call } = createRpcHarness({ oauth })
 
-  const signedOut = await handler('oauth-status', { server: 'remote' })
+  const signedOut = await call('oauth-status', { server: 'remote' })
   assert.deepEqual(signedOut, {
     ok: true,
     value: { configured: true, signedIn: false, url: 'https://a.test/api' },
@@ -117,7 +150,7 @@ test('oauth-status reports configured, signedIn, and expiresAt without token mat
     expiresAt: 1_700_000_000_000,
     refreshToken: 'rt-1',
   })
-  const signedIn = await handler('oauth-status', { server: 'remote' })
+  const signedIn = await call('oauth-status', { server: 'remote' })
   assert.deepEqual(signedIn.value, {
     configured: true,
     signedIn: true,
@@ -136,9 +169,9 @@ test('oauth-logout deletes tokens and disconnects with the oauth logout reason',
     servers: { remote: { url: 'https://a.test/api', auth: 'oauth', disabled: false } },
     store,
   })
-  const { handler } = createRpcHarness({ oauth })
+  const { call } = createRpcHarness({ oauth })
 
-  const result = await handler('oauth-logout', { server: 'remote' })
+  const result = await call('oauth-logout', { server: 'remote' })
   assert.equal(result.ok, true)
   assert.deepEqual(result.value, {
     configured: true,
@@ -157,22 +190,22 @@ test('oauth failures settle as platform-legal internal error envelopes', async (
     },
     store: memoryStore(),
   })
-  const { handler } = createRpcHarness({ oauth })
+  const { call } = createRpcHarness({ oauth })
 
-  const unknownServer = await handler('oauth-login', { server: 'ghost' })
+  const unknownServer = await call('oauth-login', { server: 'ghost' })
   assert.equal(unknownServer.ok, false)
   assert.equal(unknownServer.error.code, 'internal')
   assert.match(unknownServer.error.message, /Unknown MCP server "ghost"/)
   assert.deepEqual(unknownServer.error.details, {})
 
-  const notOauth = await handler('oauth-login', { server: 'local' })
+  const notOauth = await call('oauth-login', { server: 'local' })
   assert.equal(notOauth.ok, false)
   assert.equal(notOauth.error.code, 'internal')
   assert.match(notOauth.error.message, /does not use OAuth authentication/)
   assert.deepEqual(notOauth.error.details, {})
 
   // status stays lenient for Servers that are not configured for OAuth.
-  const unconfigured = await handler('oauth-status', { server: 'local' })
+  const unconfigured = await call('oauth-status', { server: 'local' })
   assert.deepEqual(unconfigured, {
     ok: true,
     value: { configured: false, signedIn: false },
@@ -193,9 +226,9 @@ test('oauth-login hands the authorization URL to the Client response', async () 
       return { configured: true, signedIn: false, url: 'https://a.test/api' }
     },
   }
-  const { handler } = createRpcHarness({ oauth })
+  const { call } = createRpcHarness({ oauth })
 
-  const result = await handler('oauth-login', { server: ' remote ' })
+  const result = await call('oauth-login', { server: ' remote ' })
   assert.deepEqual(calls, [['startLogin', 'remote']], 'the Server name is trimmed')
   assert.deepEqual(result, {
     ok: true,
@@ -211,9 +244,9 @@ test('oauth-logout refuses a Server that does not use OAuth and deletes nothing'
     servers: { remote: { command: 'node', auth: 'headers', disabled: false } },
     store,
   })
-  const { handler } = createRpcHarness({ oauth })
+  const { call } = createRpcHarness({ oauth })
 
-  const result = await handler('oauth-logout', { server: 'remote' })
+  const result = await call('oauth-logout', { server: 'remote' })
   assert.equal(result.ok, false)
   assert.equal(result.error.code, 'internal')
   assert.match(result.error.message, /does not use OAuth authentication/)

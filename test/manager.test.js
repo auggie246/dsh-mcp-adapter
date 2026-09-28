@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import {
-  MCP_RPC_CHANNEL,
+  MCP_RPC_ENDPOINT_PREFIX,
+  MCP_RPC_ENDPOINTS,
+  MCP_RPC_ROUTE_PREFIX,
   McpClientManager,
   installMcpManagerRpc,
 } from '../src/host/manager.js'
@@ -261,8 +263,70 @@ test('dispose waits for an in-flight connection and closes its late result', asy
   assert.equal(connection.closed, true)
 })
 
-test('Connection RPC exposes detached status and catalog snapshots', async () => {
-  let registration
+// Captures the exact Fetch routes the RPC surface registers on the shared
+// `/api` channel, then drives connection envelopes through them the way the
+// platform's shared handler does (ADR 0011).
+function rpcRouteHarness() {
+  const routes = new Map()
+  const ctx = {
+    effect(setup) {
+      setup()
+      return () => {}
+    },
+    connection: {
+      fetch: {
+        register(route) {
+          if (routes.has(route.path)) {
+            throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} is already registered`)
+          }
+          routes.set(route.path, route)
+          return async () => {
+            routes.delete(route.path)
+          }
+        },
+      },
+    },
+  }
+  const post = async (endpoint, body, signal) => {
+    const route = routes.get(`${MCP_RPC_ROUTE_PREFIX}${endpoint}`)
+    assert.ok(route !== undefined, `no route registered for ${endpoint}`)
+    const response = await route.fetch(
+      new Request(`http://mcp.test${route.path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        ...(signal === undefined ? {} : { signal }),
+      }),
+    )
+    return {
+      status: response.status,
+      json: response.headers.get('content-type')?.includes('json')
+        ? await response.json()
+        : undefined,
+    }
+  }
+  const call = async (endpoint, payload, signal) => {
+    const { status, json } = await post(
+      endpoint,
+      JSON.stringify({
+        type: 'client-request',
+        rpcId: 'rpc-1',
+        method: `${MCP_RPC_ENDPOINT_PREFIX}${endpoint}`,
+        payload,
+      }),
+      signal,
+    )
+    assert.equal(status, 200)
+    assert.deepEqual(
+      { type: json.type, rpcId: json.rpcId },
+      { type: 'server-response', rpcId: 'rpc-1' },
+    )
+    return json.result
+  }
+  return { ctx, routes, post, call }
+}
+
+test('Connection RPC routes expose detached status and catalog snapshots', async () => {
   const reconnects = []
   const manager = {
     statusSnapshot: () => ({ servers: [{ name: 'demo', state: 'connected', toolCount: 1 }] }),
@@ -270,46 +334,59 @@ test('Connection RPC exposes detached status and catalog snapshots', async () =>
     async disconnect(name, reason) { reconnects.push(['disconnect', name, reason]) },
     async listTools(name) { reconnects.push(['listTools', name]) },
   }
-  const ctx = {
-    connection: {
-      rpc: {
-        handle(channel, handler, options) {
-          registration = { channel, handler, options }
-        },
-      },
-    },
-  }
+  const { ctx, routes, call } = rpcRouteHarness()
 
   installMcpManagerRpc(ctx, manager)
-  assert.equal(registration.channel, MCP_RPC_CHANNEL)
-  assert.deepEqual(registration.options, { authority: 'trusted-host' })
-  assert.deepEqual(await registration.handler('status'), {
+  assert.deepEqual(
+    [...routes.keys()],
+    MCP_RPC_ENDPOINTS.map((endpoint) => `${MCP_RPC_ROUTE_PREFIX}${endpoint}`),
+  )
+  assert.deepEqual(await call('status'), {
     ok: true,
     value: { servers: [{ name: 'demo', state: 'connected', toolCount: 1 }] },
   })
-  assert.deepEqual(await registration.handler('catalog'), {
+  assert.deepEqual(await call('catalog'), {
     ok: true,
     value: { servers: [{ name: 'demo', tools: [{ name: 'ping' }] }] },
   })
-  assert.equal((await registration.handler('overview')).ok, true)
-  assert.equal((await registration.handler('reconnect', {})).ok, false)
+  assert.equal((await call('overview')).ok, true)
+  assert.equal((await call('reconnect', {})).ok, false)
   assert.equal(
-    (await registration.handler(
-      'reconnect',
-      { server: 'demo' },
-      new AbortController().signal,
-    )).ok,
+    (await call('reconnect', { server: 'demo' }, new AbortController().signal)).ok,
     true,
   )
   assert.deepEqual(reconnects, [
     ['disconnect', 'demo', 'manual reconnect'],
     ['listTools', 'demo'],
   ])
-  assert.equal((await registration.handler('missing')).ok, false)
+})
+
+test('Connection RPC routes guard the connection envelope before dispatch', async () => {
+  const manager = {
+    statusSnapshot: () => ({ servers: [] }),
+    catalogSnapshot: () => ({ servers: [] }),
+    async disconnect() {},
+    async listTools() {},
+  }
+  const { ctx, post } = rpcRouteHarness()
+  installMcpManagerRpc(ctx, manager)
+
+  assert.equal((await post('status', 'not json')).status, 400)
+  assert.equal(
+    (await post('status', JSON.stringify({ type: 'server-response', rpcId: 'x' }))).status,
+    400,
+  )
+  const mismatch = await post(
+    'status',
+    JSON.stringify({ type: 'client-request', rpcId: 'rpc-9', method: 'other/endpoint', payload: {} }),
+  )
+  assert.equal(mismatch.status, 200)
+  assert.equal(mismatch.json.rpcId, 'rpc-9')
+  assert.equal(mismatch.json.result.ok, false)
+  assert.equal(mismatch.json.result.error.code, 'bad-request')
 })
 
 test('reconnect failures settle as platform-legal internal error envelopes', async () => {
-  let registration
   const manager = {
     statusSnapshot: () => ({ servers: [] }),
     catalogSnapshot: () => ({ servers: [] }),
@@ -318,22 +395,10 @@ test('reconnect failures settle as platform-legal internal error envelopes', asy
       throw new Error('Could not connect to demo with streamable HTTP or SSE.')
     },
   }
-  const ctx = {
-    connection: {
-      rpc: {
-        handle(channel, handler, options) {
-          registration = { channel, handler, options }
-        },
-      },
-    },
-  }
+  const { ctx, call } = rpcRouteHarness()
   installMcpManagerRpc(ctx, manager)
 
-  const result = await registration.handler(
-    'reconnect',
-    { server: 'demo' },
-    new AbortController().signal,
-  )
+  const result = await call('reconnect', { server: 'demo' }, new AbortController().signal)
   assert.deepEqual(result, {
     ok: false,
     error: {
@@ -438,30 +503,22 @@ test('Connection RPC exposes the workspace layer snapshot only when provided', a
     async disconnect() {},
     async listTools() {},
   }
-  const handlers = []
-  const ctx = {
-    connection: {
-      rpc: {
-        handle(channel, handler, options) {
-          handlers.push(handler)
-        },
-      },
-    },
-  }
 
-  installMcpManagerRpc(ctx, manager, {
+  const withLayer = rpcRouteHarness()
+  installMcpManagerRpc(withLayer.ctx, manager, {
     layerSnapshot: () => ({ source: { demo: 'workspace' }, error: undefined }),
   })
-  installMcpManagerRpc(ctx, manager)
-  assert.equal(handlers.length, 2)
-
-  assert.deepEqual(await handlers[0]('layers'), {
+  assert.deepEqual(await withLayer.call('layers'), {
     ok: true,
-    value: { source: { demo: 'workspace' }, error: undefined },
+    // The JSON round trip drops the `error: undefined` member.
+    value: { source: { demo: 'workspace' } },
   })
-  const withoutLayer = await handlers[1]('layers')
-  assert.equal(withoutLayer.ok, false)
-  assert.equal(withoutLayer.error.code, 'bad-request')
+
+  const withoutLayer = rpcRouteHarness()
+  installMcpManagerRpc(withoutLayer.ctx, manager)
+  const missing = await withoutLayer.call('layers')
+  assert.equal(missing.ok, false)
+  assert.equal(missing.error.code, 'bad-request')
 })
 
 test('callTool delegates arguments and returns detached JSON', async () => {

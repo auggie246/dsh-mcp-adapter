@@ -1,7 +1,11 @@
 // 0.1.7 settings namespaces are profile Loader entry ids; `mcp-adapter` is the
 // id cordis.patch.yml registers for this plugin.
 export const MCP_SETTINGS_NAMESPACE = 'mcp-adapter'
-export const MCP_RPC_CHANNEL = '/mcp-adapter'
+// The status RPC rides the shared `/api` channel as exact Host Fetch routes
+// (`/api/mcp-adapter/<endpoint>`); a dedicated `connection.rpc.handle`
+// channel does not mount on DSH 0.1.7 (ADR 0011).
+export const MCP_RPC_CHANNEL = '/api'
+export const MCP_RPC_ENDPOINT_PREFIX = 'mcp-adapter/'
 
 // The configForms controller validates every mirrored namespace value against
 // the entry schema and simply never reaches `ready` when validation fails;

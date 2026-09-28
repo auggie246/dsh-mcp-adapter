@@ -35,7 +35,7 @@ function statusText(manager, name) {
 }
 
 /**
- * Same semantics as the `/mcp-adapter` reconnect RPC endpoint: close the
+ * Same semantics as the `/api/mcp-adapter/reconnect` RPC endpoint: close the
  * current connection, then list tools so the lazy lifecycle reconnects.
  */
 async function reconnectServer(manager, name) {
