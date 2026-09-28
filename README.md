@@ -66,7 +66,7 @@ Then restart DSH. The Settings panel (`⌘,` / sidebar foot) gains an **MCP** se
 
 | DSH release | Support |
 | --- | --- |
-| 0.1.7-rc.1 and newer 0.1.x | Supported. Configuration is the plugin's Loader-entry Config: the Host reads `ctx.config` and live-committed volatile updates, writes go through the settings service, and the page reads the `configForms` service and writes through the `remote.settings` face mounted by the `@deepseek-ai/dsh-api-remotes` client bundle. |
+| 0.1.7-rc.1 and newer 0.1.x | Supported. Configuration is the plugin's Loader-entry Config: the Host reads the validated Config cordis passes to `apply` (there is no `ctx.config`) plus its live-committed volatile updates, writes go through the settings service, and the page reads the `configForms` service and writes through the `remote.settings` face mounted by the `@deepseek-ai/dsh-api-remotes` client bundle. |
 | Older 0.1.x | Unsupported. Those releases require the registered-namespace settings model this plugin used through v0.3.x; upgrade DSH or stay on that release line. |
 
 Upgrading from v0.3.x on DSH 0.1.7: at the first start after the upgrade, the Adapter imports the legacy `mcp:` section of the profile's `settings.yaml` into the `mcp-adapter` entry once. A `mcp-adapter.legacy-imported` marker records the import; anything the import refuses to accept (for example an invalid section) stays in `settings.yaml.imported` and a Host warning names the manual copy path. See [ADR 0010](./docs/adr/0010-loader-entry-config-model.md).

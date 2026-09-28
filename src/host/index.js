@@ -15,17 +15,19 @@ import { installWorkspaceLayer } from './workspace-config.js'
 export const name = 'dsh-mcp-adapter'
 
 // 0.1.7 model: the Adapter's configuration is its Loader-entry Config (the
-// `Config` schema below), always readable from `ctx.config`; Timer is only
-// needed by the connection manager, and Settings by writes and the page.
+// `Config` schema below). cordis validates it and passes it to `apply` as the
+// second argument — there is no `config` service, so `ctx.config` is not a
+// thing. Timer is only needed by the connection manager, and Settings by
+// writes and the page.
 export const inject = []
 
 export const Config = McpConfigSchema
 
-export function apply(ctx) {
+export function apply(ctx, config) {
   // The bundled agent skill is independent of every other Adapter feature: a
   // deployment without the skills service simply gets no skill entry.
   // `skillInstall` is read once here, from the entry Config.
-  const scope = createMcpConfigScope(ctx)
+  const scope = createMcpConfigScope(ctx, config)
   ctx.effect(() => () => scope.dispose(), 'dsh-mcp-adapter: config scope')
   const skillInstall = scope.get().skillInstall
   const layeredScope = installWorkspaceLayer(ctx, scope)

@@ -241,8 +241,16 @@ export function readMcpConfig(config = {}, onInvalid) {
  *    updates (`loader/volatile-update`) whose value actually changed;
  *  - `update(patch)` / `mutate(ops)` write through the settings service onto
  *    this entry and throw when no settings service is mounted.
+ *
+ * `config` is the validated Config cordis hands the plugin as the second
+ * `apply` argument. Schema-declared volatile fields are stable references
+ * inside that object and the Loader commits edits into them in place, so the
+ * object stays live for the whole activation (an ordinary edit restarts the
+ * entry instead). It is the only way to read the entry Config: cordis has no
+ * `config` service, so touching `ctx.config` throws
+ * `cannot get property "config" without inject`.
  */
-export function createMcpConfigScope(ctx, options = {}) {
+export function createMcpConfigScope(ctx, config, options = {}) {
   const warn = options.warn ?? ((message) => ctx.logger?.warn?.(message))
   const settingsService = options.settings ?? (() => ctx.get('settings'))
   const listeners = new Set()
@@ -250,7 +258,7 @@ export function createMcpConfigScope(ctx, options = {}) {
   let last = readCurrent()
 
   function readCurrent() {
-    return readMcpConfig(ctx.config, (message) => {
+    return readMcpConfig(config, (message) => {
       if (message === warnedInvalid) return
       warnedInvalid = message
       warn(`dsh-mcp-adapter: invalid MCP Config, serving no Servers: ${message}`)

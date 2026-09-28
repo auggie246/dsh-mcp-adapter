@@ -33,7 +33,7 @@ The standard `mcpServers`-shaped JSON stored as the Adapter's profile Loader-ent
 _Avoid_: manifest, registry file
 
 **Entry Config**:
-The DSH 0.1.7 configuration model: a plugin's `Config` schema validated by the cordis Loader into `ctx.config`, persisted in the profile composition. Fields marked volatile are edited live through the settings forms and commit into the running plugin without a restart.
+The DSH 0.1.7 configuration model: a plugin's `Config` schema validated by the cordis Loader and handed to the plugin's `apply` as its second argument — cordis has no `config` service, so `ctx.config` is not readable — persisted in the profile composition. Fields marked volatile are edited live through the settings forms and commit into the running plugin's references without a restart.
 _Avoid_: settings namespace, settings document
 
 **Lazy Lifecycle**:

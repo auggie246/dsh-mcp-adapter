@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The Host entry no longer dies on start with `Error: cannot get property "config" without inject`. v0.4.0 read the Adapter's Loader-entry Config from `ctx.config`, but cordis 4 has no `config` service or accessor — the context proxy refuses any property the plugin did not declare in `inject`, so every DSH start that mounted the `mcp-adapter` entry threw inside `createMcpConfigScope` and the Adapter never came up. The validated Config is the second `apply` argument (`apply(ctx, config)`, the shape the shipped DSH plugins use), and its volatile fields are references the Loader commits through in place, so the scope stays live for the whole activation. `createMcpConfigScope(ctx, config)` now takes it explicitly; `test/settings.test.js` pins the contract against a real cordis fiber and its fakes refuse a `config` context property the way the proxy does. [ADR 0010](docs/adr/0010-loader-entry-config-model.md) records the correction.
+
 ## [v0.4.0] - 2026-09-27
 
 ### Added

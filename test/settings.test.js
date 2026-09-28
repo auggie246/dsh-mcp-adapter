@@ -13,7 +13,7 @@ import {
 } from '../src/host/settings.js'
 
 // The 0.1.7 Config model wraps every schema-declared volatile field in a
-// cosmokit reference; this mirrors what the Host reads from `ctx.config`.
+// cosmokit reference; this mirrors what the Host reads from the entry Config.
 function resolve(value) {
   const resolved = McpConfigSchema(value)
   const plain = {
@@ -25,11 +25,47 @@ function resolve(value) {
   return { mcpServers: plain.mcpServers, skillInstall: plain.skillInstall }
 }
 
-function fakeHostCtx(config, { settings } = {}) {
+// cordis resolves a volatile field into a frozen reference read through
+// `get()` and written only through cosmokit's shared write member — the same
+// symbol the Host uses to recognise a reference.
+const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
+
+function volatileRef(value) {
+  let current = value
+  return Object.freeze({
+    get: () => current,
+    [VOLATILE_WRITE]: (next) => (current = next),
+  })
+}
+
+// A resolved entry Config shaped like the object cordis hands `apply`.
+function fakeConfig(value = {}) {
+  const resolved = McpConfigSchema(value)
+  return {
+    mcpServers: volatileRef(resolved.mcpServers.get()),
+    skillInstall: volatileRef(resolved.skillInstall.get()),
+  }
+}
+
+// What cordis-plugin-loader does on a committed volatile update: re-resolve
+// the new raw Config and push the value through the reference the running
+// fiber already holds.
+function commitVolatile(ref, value) {
+  ref[VOLATILE_WRITE](value)
+}
+
+function resolvedServers(value) {
+  return McpConfigSchema({ mcpServers: value }).mcpServers.get()
+}
+
+// The Host fiber context, minus Config: cordis 4 resolves every context
+// property through its proxy and refuses anything the plugin did not declare
+// in `inject`, and `config` is not a service. A fake that carried Config on
+// the context would hide the crash it is supposed to catch.
+function fakeHostCtx({ settings } = {}) {
   const handlers = new Map()
   const warnings = []
-  const ctx = {
-    config,
+  const target = {
     logger: { warn: (message) => warnings.push(message) },
     on(event, handler) {
       handlers.set(event, handler)
@@ -40,6 +76,12 @@ function fakeHostCtx(config, { settings } = {}) {
     },
     get: (name) => (name === 'settings' ? settings : undefined),
   }
+  const ctx = new Proxy(target, {
+    get(obj, prop) {
+      if (prop === 'config') throw new Error('cannot get property "config" without inject')
+      return obj[prop]
+    },
+  })
   return { ctx, warnings }
 }
 
@@ -262,21 +304,21 @@ test('readMcpConfig unwraps volatile refs and fail-closes on invalid sections', 
 })
 
 test('the scope serves unwrapped Config and watches committed volatile updates', () => {
-  const config = McpConfigSchema({ mcpServers: { demo: { command: 'node' } } })
-  const { ctx } = fakeHostCtx(config)
-  const scope = createMcpConfigScope(ctx)
+  const config = fakeConfig({ mcpServers: { demo: { command: 'node' } } })
+  const { ctx } = fakeHostCtx()
+  const scope = createMcpConfigScope(ctx, config)
 
   assert.deepEqual(scope.get().mcpServers.demo.command, 'node')
 
   const seen = []
   scope.watch((next, previous) => seen.push([next, previous]))
 
-  // A committed volatile update replaces the fiber's references; the scope
-  // reports the changed value with its predecessor.
-  ctx.config = McpConfigSchema({ mcpServers: { demo: { command: 'node' }, new: { url: 'https://x.test/api' } } })
+  // A committed volatile update writes through the reference the scope already
+  // holds; the scope reports the changed value with its predecessor.
+  commitVolatile(config.mcpServers, resolvedServers({ demo: { command: 'node' }, added: { url: 'https://x.test/api' } }))
   ctx.emit('loader/volatile-update', [['mcpServers']])
   assert.equal(seen.length, 1)
-  assert.deepEqual(Object.keys(seen[0][0].mcpServers).sort(), ['demo', 'new'])
+  assert.deepEqual(Object.keys(seen[0][0].mcpServers).sort(), ['added', 'demo'])
   assert.deepEqual(Object.keys(seen[0][1].mcpServers), ['demo'])
 
   // A volatile commit that changes nothing notifies nobody.
@@ -292,8 +334,8 @@ test('scope writes land on the settings service under the entry id', async () =>
     update: async (ns, patch) => calls.push(['update', ns, patch]),
     mutate: async (ns, ops) => calls.push(['mutate', ns, ops]),
   }
-  const { ctx } = fakeHostCtx(McpConfigSchema({}), { settings })
-  const scope = createMcpConfigScope(ctx)
+  const { ctx } = fakeHostCtx({ settings })
+  const scope = createMcpConfigScope(ctx, fakeConfig())
 
   await scope.update({ mcpServers: { demo: { disabled: true } } })
   await scope.mutate([{ op: 'unset', path: ['mcpServers', 'demo'] }])
@@ -305,8 +347,8 @@ test('scope writes land on the settings service under the entry id', async () =>
 })
 
 test('scope writes explain the missing settings service instead of crashing obscurely', () => {
-  const { ctx, warnings } = fakeHostCtx(McpConfigSchema({}))
-  const scope = createMcpConfigScope(ctx)
+  const { ctx, warnings } = fakeHostCtx()
+  const scope = createMcpConfigScope(ctx, fakeConfig())
   assert.throws(() => scope.update({ mcpServers: {} }), /settings service is not mounted/)
   assert.deepEqual(warnings, [])
   scope.dispose()
@@ -316,12 +358,43 @@ test('an invalid Config warns once and serves an empty server list', () => {
   const config = McpConfigSchema({
     mcpServers: { broken: { command: 'node', url: 'https://x.test/api' } },
   })
-  const { ctx, warnings } = fakeHostCtx(config)
-  const scope = createMcpConfigScope(ctx)
+  const { ctx, warnings } = fakeHostCtx()
+  const scope = createMcpConfigScope(ctx, config)
 
   assert.deepEqual(scope.get(), { mcpServers: {}, skillInstall: 'file' })
   scope.get()
   assert.equal(warnings.length, 1)
   assert.match(warnings[0], /invalid MCP Config, serving no Servers/)
   scope.dispose()
+})
+
+// The reported crash: cordis has no `config` service, so a Host reaching for
+// `ctx.config` dies on start with `cannot get property "config" without
+// inject`. Mount the Adapter's plugin shape through a real cordis fiber and
+// pin the contract the Host actually relies on.
+test('the entry Config arrives as the apply argument, never as a context property', async () => {
+  const { Context } = await import('@deepseek-ai/cordis')
+  const probe = {
+    name: 'mcp-config-probe',
+    inject: [],
+    Config: McpConfigSchema,
+    apply(fiberCtx, config) {
+      const scope = createMcpConfigScope(fiberCtx, config)
+      let configProperty
+      try {
+        configProperty = fiberCtx.config
+      } catch (error) {
+        configProperty = error.message
+      }
+      probe.reads = [Object.keys(scope.get().mcpServers), configProperty]
+      fiberCtx.effect(() => scope.dispose(), 'mcp-config-probe: config scope')
+    },
+  }
+
+  const ctx = new Context()
+  ctx.plugin(probe, { mcpServers: { demo: { command: 'node' } } })
+  await ctx.provide()
+  ctx.fiber.dispose()
+
+  assert.deepEqual(probe.reads, [['demo'], 'cannot get property "config" without inject'])
 })
