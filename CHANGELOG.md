@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Settings > MCP loads again on DSH 0.1.7 instead of showing `Could not load MCP status: transport failure for /mcp-adapter/overview: HTTP 405`. The status RPC was a dedicated `connection.rpc.handle('/mcp-adapter', …)` channel, but DSH 0.1.7 mounts such channels with `owner.webServer.register` on the connection provider's own fiber, and cordis 4 refuses that un-injected property read — the channel silently never registered and the SPA static fallback answered every POST with 405 (the `mcp-adapter` plugin row still reads `active`; only a Host console line shows the failure). The RPC surface now mounts each endpoint as an exact Fetch route on the shared `/api` channel through the documented `connection.fetch.register` seam — the platform still applies browser authentication and the origin fence before the handler runs — and the Client calls `connection.rpc.call('/api', 'mcp-adapter/<endpoint>')`; envelopes and the page are otherwise unchanged. `test/rpc-fetch-routes.test.js` pins the mount and the dispose/remount lifecycle through a real cordis fiber, which the old `rpc.handle` fakes could not see. [ADR 0011](docs/adr/0011-rpc-on-shared-api-fetch-routes.md).
 
+### Changed
+
+- The Settings MCP nav icon fixes itself. The shell hard-codes nav icons by section id and the `settings.section` slot carries no icon option, so v0.4.1 patched the installed shell bundle by hand — and a DSH upgrade replaced the patched file, bringing the gear back. The patch core moved to `src/host/nav-icon.js` and the Adapter now applies it at every activation: after any install or DSH upgrade the icon returns on the next `dsh web` start. Only the install the process actually runs from is patched (located via the CLI entry, `DSH_ROOT` overrides), the insert stays idempotent behind the `// dsh-mcp-adapter` marker, and every failure warns instead of throwing. `scripts/patch-dsh-settings-nav-icon.mjs` remains for manual runs and `--revert` and now ships with the package. [ADR 0012](docs/adr/0012-automatic-nav-icon-patch.md).
+
 ## [v0.4.1] - 2026-09-28
 
 ### Fixed

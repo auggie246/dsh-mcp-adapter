@@ -159,6 +159,8 @@ Every page write carries the latest entry revision. Field edits use path mutatio
 
 The status surface talks to the Host through exact Fetch routes on the shared `/api` channel (`POST /api/mcp-adapter/<endpoint>`), authenticated by the platform like every other `/api` request ([ADR 0011](./docs/adr/0011-rpc-on-shared-api-fetch-routes.md)). If the page instead shows `Could not load MCP status: … HTTP 405`, the installed Adapter predates v0.4.2: its dedicated RPC channel cannot mount on DSH 0.1.7. Upgrade and restart DSH.
 
+The sidebar's MCP row shows a link icon. The icon map lives in the DSH settings shell and the `settings.section` slot carries no icon option, so the Adapter patches one marked branch into the installed shell bundle at every start — after a DSH upgrade the icon returns by itself, and if it does not, restart `dsh web` and refresh the page. `scripts/patch-dsh-settings-nav-icon.mjs` wraps the same patch for manual runs (`--icon <Name>`, `--revert`). See [ADR 0012](./docs/adr/0012-automatic-nav-icon-patch.md).
+
 ### Server lifecycle
 
 Each Server's `lifecycle` setting controls when it connects and whether it idles out. `lazy` remains the default.

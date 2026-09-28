@@ -1,6 +1,7 @@
 import { installMcpCommands } from './commands.js'
 import { installMcpManager, installMcpManagerRpc } from './manager.js'
 import { createMcpConnection } from './mcp-connection.js'
+import { installMcpNavIconPatch } from './nav-icon.js'
 import { installMcpOauthCommands } from './oauth-commands.js'
 import { createFileTokenStore } from './oauth.js'
 import { installMcpOauth } from './oauth-service.js'
@@ -24,6 +25,10 @@ export const inject = []
 export const Config = McpConfigSchema
 
 export function apply(ctx, config) {
+  // Settings chrome first: the nav icon patch is independent of every other
+  // Adapter feature, lands at most one marked branch in the installed shell
+  // bundle, and warns instead of throwing when the install is not patchable.
+  installMcpNavIconPatch(ctx)
   // The bundled agent skill is independent of every other Adapter feature: a
   // deployment without the skills service simply gets no skill entry.
   // `skillInstall` is read once here, from the entry Config.
@@ -94,6 +99,7 @@ export * from './commands.js'
 export * from './legacy-import.js'
 export * from './manager.js'
 export * from './mcp-connection.js'
+export * from './nav-icon.js'
 export * from './oauth-commands.js'
 export * from './oauth-service.js'
 export * from './oauth.js'
