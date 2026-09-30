@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- DSH 0.2.0-rc.2 no longer skips the plugin. A web profile running DSH 0.2.0-rc.2 refused to load the Adapter at all, logging `skipping profile bundle "@auggieteo/dsh-mcp-adapter": Plugin @auggieteo/dsh-mcp-adapter@0.4.2 is incompatible with dsh 0.2.0-rc.2: peerDependencies {"@deepseek-ai/dsh-settings":"^0.1.7-rc.1"}` and leaving MCP unconfigured — the runtime gates every `@deepseek-ai/dsh*` peer range against **its own version**, so a range capped at `^0.1.7-rc.1` excludes every 0.2.x release. The break is declaration-only: checked against the installed 0.2.0-rc.2 packages, every surface the Adapter uses is unchanged — `@deepseek-ai/dsh-settings` still exports `SettingsForms` and `redactSecrets`, the host `connection.fetch.register` exact-route seam takes the same `{ path, methods, requestBody, fetch }` route, the client's `connection.rpc.call(channel, endpoint, …)` signature is unchanged, `configForms` keeps `get`/`describe`/`mutate` over the positional `remote.settings` wire, the `settings.section` slot survives, `loader/volatile-update` still commits volatile Config edits (cordis-plugin-loader 1.0.5), schemastery is the same 3.18.4, and the nav-icon patch's `MODELS_BRANCH` pattern still matches the 0.2.0-rc.2 settings shell. The peer range therefore widens to `@deepseek-ai/dsh-settings` `^0.1.7-rc.1 || ^0.2.0-rc.1` with no source change, and no legacy drop is needed — DSH 0.1.7-rc.x keeps working. Compatibility is pinned by execution, not by diff reading: `test/client-apply.test.js` adds a 0.2.0-rc.2 generation fake locking the identical positional write (`remote.update`, `mcp-adapter`, the Server patch, revision `7` → `8`), and `test/package.test.js` pins the range against both generations' runtime versions. No exact-version exemption (`dsh plugin allow-version`) is needed: update the plugin instead. [ADR 0009](docs/adr/0009-dual-generation-settings-api.md).
+
 ## [v0.4.2] - 2026-09-28
 
 ### Fixed

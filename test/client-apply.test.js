@@ -357,3 +357,45 @@ test('apply fails with guidance when no settings write face exists', async () =>
   // receives a plugin handle.
   assert.throws(() => mod.apply(ctx), /settings write API/)
 })
+
+test('apply wires the 0.2.0-rc.2 remote settings face identically', async () => {
+  // DSH 0.2.0-rc.2 mounts the same client surface as 0.1.7 — the `configForms`
+  // service, the governed dotted `remote.settings` namespace, positional write
+  // arguments, and the flat `{ ok, value }` envelope — verified against the
+  // installed 0.2.0-rc.2 packages. This case pins that generation by execution
+  // (ADR 0009): the peer range widens because the suite proves the shape, not
+  // because a diff looked unchanged. Any drift in the mount shape fails here.
+  const mod = await loadClientModule()
+  const calls = []
+  const { ctx, describe } = fakeCtx({
+    calls,
+    views: {
+      update: (ns, patch, expectedRevision) => okView(ns, patch, expectedRevision),
+      mutate: (ns, ops, expectedRevision) => okView(ns, {}, expectedRevision),
+    },
+  })
+  await applyWithFakeDocument(ctx, mod)
+
+  const controller = ctx.lastRegistered.inject().controller
+  const added = await controller.addServer('fixture', { command: 'node', args: ['server.mjs'] })
+  assert.equal(added, true)
+  assert.deepEqual(
+    calls.filter(([method]) => method.startsWith('remote.')),
+    [[
+      'remote.update',
+      'mcp-adapter',
+      {
+        mcpServers: {
+          fixture: normalizeServerConfig('fixture', { command: 'node', args: ['server.mjs'] }),
+        },
+      },
+      7,
+    ]],
+  )
+  const row = describe
+    .getSnapshot()
+    .view.namespaces
+    .find((entry) => entry.ns === 'mcp-adapter')
+  assert.equal(row.revision, 8)
+  await controller.dispose()
+})
